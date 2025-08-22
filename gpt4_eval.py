@@ -1,22 +1,21 @@
-import openai
 import json
-import argparse
 import tqdm
 import time
+from openai import OpenAI
+from pydantic import BaseModel
+from settings import config
+
+
+class EvaluationScore(BaseModel):
+    """Structured output for evaluation scores."""
+    score: float
 
 if __name__ == '__main__':
+    # Initialize OpenAI client with API key from config
+    client = OpenAI(api_key=config.openai_api_key)
 
-    argparser = argparse.ArgumentParser()
-    argparser.add_argument('--prompt_fp', type=str, default='prompts\summeval\con_detailed.txt')
-    argparser.add_argument('--save_fp', type=str, default='results\gpt4_con_detailed_openai.json')
-    argparser.add_argument('--summeval_fp', type=str, default='data\summeval.json')
-    argparser.add_argument('--key', type=str, required=True)
-    argparser.add_argument('--model', type=str, default='gpt-4-0613')
-    args = argparser.parse_args()
-    openai.api_key = args.key
-
-    summeval = json.load(open(args.summeval_fp))
-    prompt = open(args.prompt_fp).read()
+    summeval = json.load(open(config.summeval_fp))
+    prompt = open(config.prompt_fp).read()
 
     ct, ignore = 0, 0
 
@@ -28,22 +27,24 @@ if __name__ == '__main__':
         instance['prompt'] = cur_prompt
         while True:
             try:
-                _response = openai.ChatCompletion.create(
-                    model=args.model,
+                # Using Chat Completions API with Structured Outputs - single call with multiple responses
+                _response = client.chat.completions.parse(
+                    model=config.model,
                     messages=[{"role": "system", "content": cur_prompt}],
-                    temperature=2,
-                    max_tokens=5,
-                    top_p=1,
-                    frequency_penalty=0,
-                    presence_penalty=0,
-                    stop=None,
-                    # logprobs=40,
-                    n=20
+                    temperature=config.temperature,
+                    max_tokens=config.max_tokens,
+                    top_p=config.top_p,
+                    frequency_penalty=config.frequency_penalty,
+                    presence_penalty=config.presence_penalty,
+                    response_format=EvaluationScore,
+                    n=config.n_responses  # Generate multiple responses in single call (original behavior)
                 )
-                time.sleep(0.5)
+                time.sleep(config.sleep_time)
 
-                all_responses = [_response['choices'][i]['message']['content'] for i in
-                                 range(len(_response['choices']))]
+                # Extract all structured responses (same as original code logic)
+                all_responses = [_response.choices[i].message.parsed.score for i in
+                                 range(len(_response.choices))]
+
                 instance['all_responses'] = all_responses
                 new_json.append(instance)
                 ct += 1
@@ -51,7 +52,7 @@ if __name__ == '__main__':
             except Exception as e:
                 print(e)
                 if ("limit" in str(e)):
-                    time.sleep(2)
+                    time.sleep(config.rate_limit_sleep)
                 else:
                     ignore += 1
                     print('ignored', ignore)
@@ -59,5 +60,5 @@ if __name__ == '__main__':
                     break
 
     print('ignored total', ignore)
-    with open(args.save_fp, 'w') as f:
+    with open(config.save_fp, 'w') as f:
         json.dump(new_json, f, indent=4)
