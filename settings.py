@@ -12,7 +12,7 @@ class Config:
         # File paths with default values
         self.prompt_fp = os.getenv('PROMPT_FP', 'prompts/summeval/con_detailed.txt')
         self.save_fp = os.getenv('SAVE_FP', 'results/gpt4_con_detailed_openai.json')
-        self.summeval_fp = os.getenv('SUMMEVAL_FP', 'data/summeval.json')
+        self.summeval_fp = os.getenv('SUMMEVAL_FP', 'data/summeval_4.json')
         
         # OpenAI API configuration
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
@@ -24,15 +24,19 @@ class Config:
         
         # API call parameters
         self.temperature = float(os.getenv('TEMPERATURE', '2'))
-        self.max_tokens = int(os.getenv('MAX_TOKENS', '50'))  # Increased for structured JSON output
+        self.max_tokens = int(os.getenv('MAX_TOKENS', '2500'))  # Increased for structured JSON output
         self.top_p = float(os.getenv('TOP_P', '1'))
         self.frequency_penalty = float(os.getenv('FREQUENCY_PENALTY', '0'))
         self.presence_penalty = float(os.getenv('PRESENCE_PENALTY', '0'))
-        self.n_responses = int(os.getenv('N_RESPONSES', '20'))
+        self.n_responses = int(os.getenv('N_RESPONSES', '10'))
         
         # Sleep time between API calls
         self.sleep_time = float(os.getenv('SLEEP_TIME', '0.5'))
         self.rate_limit_sleep = float(os.getenv('RATE_LIMIT_SLEEP', '2'))
+        
+        # Evaluation correlation settings
+        self.eval_input_fp = os.getenv('EVAL_INPUT_FP', self.save_fp)  # Default to the save_fp from gpt4_eval
+        self.evaluation_dimension = os.getenv('EVALUATION_DIMENSION', 'consistency')  # Default dimension
 
 
 # Create a global config instance
