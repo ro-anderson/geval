@@ -11,8 +11,8 @@ class Config:
     def __init__(self):
         # File paths with default values
         self.prompt_fp = os.getenv('PROMPT_FP', 'prompts/summeval/con_detailed.txt')
-        self.save_fp = os.getenv('SAVE_FP', 'results/gpt4_con_detailed_openai.json')
-        self.summeval_fp = os.getenv('SUMMEVAL_FP', 'data/summeval_4.json')
+        self.save_fp = os.getenv('SAVE_FP', 'results/gpt4_con_detailed_openai_50.json')
+        self.summeval_fp = os.getenv('SUMMEVAL_FP', 'data/summeval_shuffle_50.json')
         
         # OpenAI API configuration
         self.openai_api_key = os.getenv('OPENAI_API_KEY')

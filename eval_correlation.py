@@ -105,15 +105,14 @@ if __name__ == '__main__':
         print(f"Error: Invalid JSON in file {input_fp}")
         exit(1)
 
-    pred_scores, human_scores = {}, {}
+    pred_scores = []
+    human_scores = []
 
     print("Calculating correlation for G-Eval")
+    print("Note: Each item represents a unique document-summary pair")
     
     for item in jobj:
         doc_id = item["doc_id"]
-        if doc_id not in pred_scores:
-            pred_scores[doc_id] = []
-            human_scores[doc_id] = []
 
         # Handle both old and new data formats
         all_responses = item["all_responses"]
@@ -128,62 +127,59 @@ if __name__ == '__main__':
             
             if all_scores:  # Only proceed if we have valid scores
                 score = sum(all_scores) / len(all_scores)
-                pred_scores[doc_id].append(score)
                 
                 # Check if dimension exists in scores
                 if 'scores' in item and dimension in item['scores']:
-                    human_scores[doc_id].append(item['scores'][dimension])
+                    pred_scores.append(score)
+                    human_scores.append(item['scores'][dimension])
                 else:
                     print(f"Warning: Dimension '{dimension}' not found in item {doc_id}")
                     print(f"Available dimensions: {list(item.get('scores', {}).keys())}")
 
-    print(f'Documents with predicted scores: {len(pred_scores)}')
-    print(f'Documents with human scores: {len(human_scores)}')
+    print(f'Total items processed: {len(jobj)}')
+    print(f'Valid score pairs: {len(pred_scores)}')
 
-    # Check if we have matching data
-    valid_docs = []
-    for doc_id in pred_scores:
-        if doc_id in human_scores and len(pred_scores[doc_id]) > 0 and len(human_scores[doc_id]) > 0:
-            valid_docs.append(doc_id)
-
-    print(f'Valid documents for correlation: {len(valid_docs)}')
-
-    if len(valid_docs) == 0:
-        print("Error: No valid document pairs found for correlation calculation.")
+    if len(pred_scores) == 0:
+        print("Error: No valid score pairs found for correlation calculation.")
         print("Check that:")
         print("1. The input file contains the correct data format")
         print("2. The dimension name matches what's in the data")
         print("3. Both predicted and human scores are available")
         exit(1)
 
-    results = {'pearson': 0, 'spearman': 0, 'kendalltau': 0}
-    d_ctr = 0
-    
-    for doc_id in valid_docs:
-        pred_scores_doc = pred_scores[doc_id]
-        human_scores_doc = human_scores[doc_id]
-        
-        # Skip documents with no variance in scores
-        if (len(set(human_scores_doc)) <= 1) or (len(set(pred_scores_doc)) <= 1):
-            continue
-
-        results = calculate_correlation(pred_scores_doc, human_scores_doc, results)
-        d_ctr += 1
-
-    if d_ctr == 0:
-        print("Error: No documents with sufficient score variance for correlation calculation.")
+    if len(pred_scores) < 2:
+        print("Error: Need at least 2 score pairs for correlation calculation.")
         exit(1)
 
-    print(f"Correlation calculated over {d_ctr} documents:")
-    print_correlations(results, n=d_ctr)
+    # Check for variance in scores
+    if len(set(pred_scores)) <= 1:
+        print("Error: No variance in predicted scores - all scores are the same.")
+        exit(1)
+        
+    if len(set(human_scores)) <= 1:
+        print("Error: No variance in human scores - all scores are the same.")
+        exit(1)
+
+    print(f"Calculating correlation across {len(pred_scores)} document-summary pairs:")
+    
+    # Calculate correlation directly between the two lists
+    pearson_corr, _ = pearsonr(pred_scores, human_scores)
+    spearman_corr, _ = spearmanr(pred_scores, human_scores)
+    kendall_corr, _ = kendalltau(pred_scores, human_scores)
+    
+    # Display results in table format
+    table = PrettyTable(['Pearson', 'Spearman', 'Kendall'])
+    table.add_row([
+        round(pearson_corr, 4), 
+        round(spearman_corr, 4), 
+        round(kendall_corr, 4)
+    ])
+    print(table)
     
     # Print additional statistics
-    all_pred_scores = [score for doc_scores in pred_scores.values() for score in doc_scores]
-    all_human_scores = [score for doc_scores in human_scores.values() for score in doc_scores]
-    
-    if all_pred_scores and all_human_scores:
+    if pred_scores and human_scores:
         print(f"\nScore statistics:")
-        print(f"Predicted scores - Mean: {sum(all_pred_scores)/len(all_pred_scores):.3f}, "
-              f"Range: [{min(all_pred_scores):.3f}, {max(all_pred_scores):.3f}]")
-        print(f"Human scores - Mean: {sum(all_human_scores)/len(all_human_scores):.3f}, "
-              f"Range: [{min(all_human_scores):.3f}, {max(all_human_scores):.3f}]")
+        print(f"Predicted scores - Mean: {sum(pred_scores)/len(pred_scores):.3f}, "
+              f"Range: [{min(pred_scores):.3f}, {max(pred_scores):.3f}]")
+        print(f"Human scores - Mean: {sum(human_scores)/len(human_scores):.3f}, "
+              f"Range: [{min(human_scores):.3f}, {max(human_scores):.3f}]")
