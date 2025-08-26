@@ -1,0 +1,7 @@
+{
+  "name": "Consistency",
+  "task_introduction": "You will be given an expected output and an actual output. Your task is to rate the actual output on one metric. Please make sure you read and understand these instructions carefully. Please keep this document open while reviewing, and refer to it as needed.",
+  "evaluation_criteria": "Consistency (1-5) - the factual alignment between the actual output and the expected output. A factually consistent actual output contains only statements that are entailed by the expected output. Penalize any hallucinated or unsupported facts. Evaluation Steps: 1. Read the expected output carefully and identify the main facts and details it presents. 2. Read the actual output and compare it to the expected output. Check if the actual output contains any factual errors that are not supported by the expected output. 3. Assign a score for consistency based on the Evaluation Criteria.",
+  "min_score": 1,
+  "max_score": 5
+}

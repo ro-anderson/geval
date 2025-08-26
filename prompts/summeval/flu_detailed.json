@@ -1,0 +1,7 @@
+{
+  "name": "Fluency",
+  "task_introduction": "You will be given an actual output to evaluate. Your task is to rate the actual output on one metric. Please make sure you read and understand these instructions carefully. Please keep this document open while reviewing, and refer to it as needed.",
+  "evaluation_criteria": "Fluency (1-3): the quality of the actual output in terms of grammar, spelling, punctuation, word choice, and sentence structure. - 1: Poor. The output has many errors that make it hard to understand or sound unnatural. - 2: Fair. The output has some errors that affect the clarity or smoothness of the text, but the main points are still comprehensible. - 3: Good. The output has few or no errors and is easy to read and follow.",
+  "min_score": 1,
+  "max_score": 3
+}

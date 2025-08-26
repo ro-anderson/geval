@@ -1,0 +1,7 @@
+{
+  "name": "Coherence",
+  "task_introduction": "You will be given an expected output and an actual output. Your task is to rate the actual output on one metric. Please make sure you read and understand these instructions carefully. Please keep this document open while reviewing, and refer to it as needed.",
+  "evaluation_criteria": "Coherence (1-5) - the collective quality of all sentences. The actual output should be well-structured and well-organized. The actual output should not just be a heap of related information, but should build from sentence to a coherent body of information about a topic. Evaluation Steps: 1. Read the expected output carefully and identify the main topic and key points. 2. Read the actual output and compare it to the expected output. Check if the actual output covers the main topic and key points of the expected output, and if it presents them in a clear and logical order. 3. Assign a score for coherence on a scale of 1 to 5, where 1 is the lowest and 5 is the highest based on the Evaluation Criteria.",
+  "min_score": 1,
+  "max_score": 5
+}

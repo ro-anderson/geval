@@ -1,0 +1,7 @@
+{
+  "name": "Relevance",
+  "task_introduction": "You will be given an expected output and an actual output. Your task is to rate the actual output on one metric. Please make sure you read and understand these instructions carefully. Please keep this document open while reviewing, and refer to it as needed.",
+  "evaluation_criteria": "Relevance (1-5) - selection of important content from the expected output. The actual output should include only important information from the expected output. Penalize actual outputs which contain redundancies and excess information. Evaluation Steps: 1. Read the actual output and the expected output carefully. 2. Compare the actual output to the expected output and identify the main points. 3. Assess how well the actual output covers the main points of the expected output, and how much irrelevant or redundant information it contains. 4. Assign a relevance score from 1 to 5.",
+  "min_score": 1,
+  "max_score": 5
+}

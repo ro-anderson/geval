@@ -21,7 +21,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 from settings import config
-
+import time
 
 def calculate_correlation(pred_score, human_score, result):
     """Calculate correlation coefficients between predicted and human scores."""
@@ -172,7 +172,7 @@ def create_correlation_visualizations(df, dimension, n_samples):
     plt.tight_layout()
     
     # Save the plot
-    output_filename = f'correlation_analysis_{dimension}_{n_samples}samples.png'
+    output_filename = f'correlation_analysis_{dimension}_{n_samples}samples_{timestamp}.png'
     plt.savefig(output_filename, dpi=300, bbox_inches='tight')
     print(f"📊 Correlation visualization saved as: {output_filename}")
     
@@ -186,7 +186,7 @@ if __name__ == '__main__':
     # Use config values for evaluation
     input_fp = config.eval_input_fp
     dimension = config.evaluation_dimension
-    
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
     # Auto-detect dimension from filepath if config dimension doesn't seem to match
     auto_detected_dimension = get_dimension_from_filepath(input_fp)
     if auto_detected_dimension != dimension:
@@ -305,6 +305,7 @@ if __name__ == '__main__':
     create_correlation_visualizations(df, dimension, len(df))
     
     # Save DataFrame for further analysis
-    csv_filename = f'correlation_data_{dimension}_{len(df)}samples.csv'
+    
+    csv_filename = f'correlation_data_{dimension}_{len(df)}samples_{timestamp}.csv'
     df.to_csv(csv_filename, index=False)
     print(f"📄 Correlation data saved as: {csv_filename}")

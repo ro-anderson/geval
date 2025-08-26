@@ -1,4 +1,5 @@
 import os
+import json
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -10,9 +11,9 @@ class Config:
     
     def __init__(self):
         # File paths with default values
-        self.prompt_fp = os.getenv('PROMPT_FP', 'prompts/summeval/con_detailed.txt')
-        self.save_fp = os.getenv('SAVE_FP', 'results/gpt4_con_detailed_openai_500.json')
-        self.summeval_fp = os.getenv('SUMMEVAL_FP', 'data/summeval_shuffle_500.json')
+        self.prompt_fp = os.getenv('PROMPT_FP', 'prompts/summeval/con_detailed.json')  # Changed to JSON
+        self.save_fp = os.getenv('SAVE_FP', 'results/gpt4_con_detailed_openai_4.json')
+        self.summeval_fp = os.getenv('SUMMEVAL_FP', 'data/summeval_shuffle_4.json')
         
         # OpenAI API configuration
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
@@ -36,8 +37,43 @@ class Config:
         
         # Evaluation correlation settings
         #self.eval_input_fp = os.getenv('EVAL_INPUT_FP', self.save_fp)  # Default to the save_fp from gpt4_eval
-        self.eval_input_fp = os.getenv('EVAL_INPUT_FP', 'results/gpt4_con_detailed_openai_500_dummy.json')  # Default to the save_fp from gpt4_eval
+        self.eval_input_fp = os.getenv('EVAL_INPUT_FP', 'results/gpt4_con_detailed_openai_4.json')  # Default to the save_fp from gpt4_eval
         self.evaluation_dimension = os.getenv('EVALUATION_DIMENSION', 'consistency')  # Default dimension
+
+    def load_prompt_config(self, prompt_path: str = None) -> dict:
+        """
+        Load prompt configuration from JSON file.
+        
+        Args:
+            prompt_path: Path to prompt JSON file. If None, uses self.prompt_fp
+            
+        Returns:
+            Dictionary containing prompt configuration
+        """
+        if prompt_path is None:
+            prompt_path = self.prompt_fp
+            
+        try:
+            with open(prompt_path, 'r') as f:
+                config = json.load(f)
+            
+            # Validate required fields
+            required_fields = ['task_introduction', 'evaluation_criteria']
+            for field in required_fields:
+                if field not in config:
+                    raise ValueError(f"Missing required field '{field}' in prompt config: {prompt_path}")
+            
+            # Set default values for optional fields
+            config.setdefault('min_score', 1)
+            config.setdefault('max_score', 5)
+            config.setdefault('requires_document', True)
+            
+            return config
+            
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Prompt configuration file not found: {prompt_path}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in prompt configuration file {prompt_path}: {e}")
 
 
 # Create a global config instance
