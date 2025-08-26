@@ -35,7 +35,8 @@ class Config:
         self.rate_limit_sleep = float(os.getenv('RATE_LIMIT_SLEEP', '0'))
         
         # Evaluation correlation settings
-        self.eval_input_fp = os.getenv('EVAL_INPUT_FP', self.save_fp)  # Default to the save_fp from gpt4_eval
+        #self.eval_input_fp = os.getenv('EVAL_INPUT_FP', self.save_fp)  # Default to the save_fp from gpt4_eval
+        self.eval_input_fp = os.getenv('EVAL_INPUT_FP', 'results/gpt4_con_detailed_openai_500_dummy.json')  # Default to the save_fp from gpt4_eval
         self.evaluation_dimension = os.getenv('EVALUATION_DIMENSION', 'consistency')  # Default dimension
 
 
