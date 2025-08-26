@@ -11,8 +11,8 @@ class Config:
     def __init__(self):
         # File paths with default values
         self.prompt_fp = os.getenv('PROMPT_FP', 'prompts/summeval/con_detailed.txt')
-        self.save_fp = os.getenv('SAVE_FP', 'results/gpt4_con_detailed_openai_50.json')
-        self.summeval_fp = os.getenv('SUMMEVAL_FP', 'data/summeval_shuffle_50.json')
+        self.save_fp = os.getenv('SAVE_FP', 'results/gpt4_con_detailed_openai_500.json')
+        self.summeval_fp = os.getenv('SUMMEVAL_FP', 'data/summeval_shuffle_500.json')
         
         # OpenAI API configuration
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
@@ -31,8 +31,8 @@ class Config:
         self.n_responses = int(os.getenv('N_RESPONSES', '10'))
         
         # Sleep time between API calls
-        self.sleep_time = float(os.getenv('SLEEP_TIME', '0.5'))
-        self.rate_limit_sleep = float(os.getenv('RATE_LIMIT_SLEEP', '2'))
+        self.sleep_time = float(os.getenv('SLEEP_TIME', '0'))
+        self.rate_limit_sleep = float(os.getenv('RATE_LIMIT_SLEEP', '0'))
         
         # Evaluation correlation settings
         self.eval_input_fp = os.getenv('EVAL_INPUT_FP', self.save_fp)  # Default to the save_fp from gpt4_eval
