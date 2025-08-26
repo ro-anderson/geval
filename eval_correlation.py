@@ -16,6 +16,10 @@ from prettytable import PrettyTable
 from scipy.stats import spearmanr, pearsonr, kendalltau
 import json
 import re
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import numpy as np
 from settings import config
 
 
@@ -80,6 +84,104 @@ def get_dimension_from_filepath(filepath):
         return 'consistency'  # default
 
 
+def create_correlation_visualizations(df, dimension, n_samples):
+    """Create and save correlation visualizations using seaborn."""
+    
+    # Set style for better-looking plots
+    sns.set_style("whitegrid")
+    plt.style.use('default')
+    
+    # Calculate correlations for titles
+    pearson_corr = df['predicted_scores'].corr(df['human_scores'], method='pearson')
+    spearman_corr = df['predicted_scores'].corr(df['human_scores'], method='spearman')
+    kendall_corr = df['predicted_scores'].corr(df['human_scores'], method='kendall')
+    
+    # Create figure with subplots
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    fig.suptitle(f'G-EVAL Correlation Analysis - {dimension.title()} Dimension\n'
+                 f'Dataset: {n_samples} document-summary pairs', fontsize=16, fontweight='bold')
+    
+    # 1. Scatter plot with regression line
+    sns.scatterplot(data=df, x='human_scores', y='predicted_scores', 
+                   alpha=0.7, s=60, color='steelblue', ax=axes[0,0])
+    sns.regplot(data=df, x='human_scores', y='predicted_scores', 
+               scatter=False, color='red', ax=axes[0,0])
+    axes[0,0].set_title(f'Predicted vs Human Scores\nPearson r = {pearson_corr:.3f}', 
+                       fontsize=12, fontweight='bold')
+    axes[0,0].set_xlabel('Human Scores', fontsize=11)
+    axes[0,0].set_ylabel('G-EVAL Predicted Scores', fontsize=11)
+    axes[0,0].grid(True, alpha=0.3)
+    
+    # Add diagonal reference line
+    min_val = min(df['human_scores'].min(), df['predicted_scores'].min())
+    max_val = max(df['human_scores'].max(), df['predicted_scores'].max())
+    axes[0,0].plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, label='Perfect correlation')
+    axes[0,0].legend()
+    
+    # 2. Distribution comparison
+    axes[0,1].hist(df['human_scores'], alpha=0.7, label='Human Scores', 
+                  bins=20, color='lightcoral', density=True)
+    axes[0,1].hist(df['predicted_scores'], alpha=0.7, label='G-EVAL Scores', 
+                  bins=20, color='steelblue', density=True)
+    axes[0,1].set_title('Score Distributions Comparison', fontsize=12, fontweight='bold')
+    axes[0,1].set_xlabel('Score Value', fontsize=11)
+    axes[0,1].set_ylabel('Density', fontsize=11)
+    axes[0,1].legend()
+    axes[0,1].grid(True, alpha=0.3)
+    
+    # 3. Residuals plot
+    residuals = df['predicted_scores'] - df['human_scores']
+    sns.scatterplot(x=df['human_scores'], y=residuals, alpha=0.7, 
+                   color='green', s=60, ax=axes[1,0])
+    axes[1,0].axhline(y=0, color='red', linestyle='--', alpha=0.7)
+    axes[1,0].set_title('Residuals Plot\n(Predicted - Human)', fontsize=12, fontweight='bold')
+    axes[1,0].set_xlabel('Human Scores', fontsize=11)
+    axes[1,0].set_ylabel('Residuals', fontsize=11)
+    axes[1,0].grid(True, alpha=0.3)
+    
+    # 4. Correlation summary table as plot
+    corr_data = {
+        'Metric': ['Pearson', 'Spearman', 'Kendall'],
+        'Correlation': [pearson_corr, spearman_corr, kendall_corr],
+        'Interpretation': [
+            'Linear relationship',
+            'Monotonic relationship', 
+            'Rank concordance'
+        ]
+    }
+    corr_df = pd.DataFrame(corr_data)
+    
+    axes[1,1].axis('tight')
+    axes[1,1].axis('off')
+    table = axes[1,1].table(cellText=[[f'{row.Metric}', f'{row.Correlation:.4f}', f'{row.Interpretation}'] 
+                                     for _, row in corr_df.iterrows()],
+                           colLabels=['Metric', 'Value', 'Measures'],
+                           cellLoc='center',
+                           loc='center',
+                           colWidths=[0.25, 0.25, 0.5])
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1, 2)
+    axes[1,1].set_title('Correlation Summary', fontsize=12, fontweight='bold')
+    
+    # Style the table
+    for i in range(len(corr_df.columns)):
+        table[(0, i)].set_facecolor('#4CAF50')
+        table[(0, i)].set_text_props(weight='bold', color='white')
+    
+    plt.tight_layout()
+    
+    # Save the plot
+    output_filename = f'correlation_analysis_{dimension}_{n_samples}samples.png'
+    plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+    print(f"📊 Correlation visualization saved as: {output_filename}")
+    
+    # Show the plot
+    plt.show()
+    
+    return pearson_corr, spearman_corr, kendall_corr
+
+
 if __name__ == '__main__':
     # Use config values for evaluation
     input_fp = config.eval_input_fp
@@ -105,8 +207,8 @@ if __name__ == '__main__':
         print(f"Error: Invalid JSON in file {input_fp}")
         exit(1)
 
-    pred_scores = []
-    human_scores = []
+    # Prepare data for pandas DataFrame
+    data_rows = []
 
     print("Calculating correlation for G-Eval")
     print("Note: Each item represents a unique document-summary pair")
@@ -130,16 +232,24 @@ if __name__ == '__main__':
                 
                 # Check if dimension exists in scores
                 if 'scores' in item and dimension in item['scores']:
-                    pred_scores.append(score)
-                    human_scores.append(item['scores'][dimension])
+                    data_rows.append({
+                        'doc_id': doc_id,
+                        'predicted_scores': score,
+                        'human_scores': item['scores'][dimension],
+                        'system_id': item.get('system_id', 'unknown'),
+                        'score_variance': np.var(all_scores) if len(all_scores) > 1 else 0.0
+                    })
                 else:
                     print(f"Warning: Dimension '{dimension}' not found in item {doc_id}")
                     print(f"Available dimensions: {list(item.get('scores', {}).keys())}")
 
+    # Create pandas DataFrame
+    df = pd.DataFrame(data_rows)
+    
     print(f'Total items processed: {len(jobj)}')
-    print(f'Valid score pairs: {len(pred_scores)}')
+    print(f'Valid score pairs: {len(df)}')
 
-    if len(pred_scores) == 0:
+    if len(df) == 0:
         print("Error: No valid score pairs found for correlation calculation.")
         print("Check that:")
         print("1. The input file contains the correct data format")
@@ -147,25 +257,25 @@ if __name__ == '__main__':
         print("3. Both predicted and human scores are available")
         exit(1)
 
-    if len(pred_scores) < 2:
+    if len(df) < 2:
         print("Error: Need at least 2 score pairs for correlation calculation.")
         exit(1)
 
     # Check for variance in scores
-    if len(set(pred_scores)) <= 1:
+    if df['predicted_scores'].nunique() <= 1:
         print("Error: No variance in predicted scores - all scores are the same.")
         exit(1)
         
-    if len(set(human_scores)) <= 1:
+    if df['human_scores'].nunique() <= 1:
         print("Error: No variance in human scores - all scores are the same.")
         exit(1)
 
-    print(f"Calculating correlation across {len(pred_scores)} document-summary pairs:")
+    print(f"Calculating correlation across {len(df)} document-summary pairs:")
     
-    # Calculate correlation directly between the two lists
-    pearson_corr, _ = pearsonr(pred_scores, human_scores)
-    spearman_corr, _ = spearmanr(pred_scores, human_scores)
-    kendall_corr, _ = kendalltau(pred_scores, human_scores)
+    # Calculate correlations using pandas
+    pearson_corr = df['predicted_scores'].corr(df['human_scores'], method='pearson')
+    spearman_corr = df['predicted_scores'].corr(df['human_scores'], method='spearman')
+    kendall_corr = df['predicted_scores'].corr(df['human_scores'], method='kendall')
     
     # Display results in table format
     table = PrettyTable(['Pearson', 'Spearman', 'Kendall'])
@@ -176,10 +286,25 @@ if __name__ == '__main__':
     ])
     print(table)
     
-    # Print additional statistics
-    if pred_scores and human_scores:
-        print(f"\nScore statistics:")
-        print(f"Predicted scores - Mean: {sum(pred_scores)/len(pred_scores):.3f}, "
-              f"Range: [{min(pred_scores):.3f}, {max(pred_scores):.3f}]")
-        print(f"Human scores - Mean: {sum(human_scores)/len(human_scores):.3f}, "
-              f"Range: [{min(human_scores):.3f}, {max(human_scores):.3f}]")
+    # Print detailed statistics using pandas
+    print(f"\n📊 Detailed Score Statistics:")
+    print(f"Predicted scores - Mean: {df['predicted_scores'].mean():.3f}, "
+          f"Std: {df['predicted_scores'].std():.3f}, "
+          f"Range: [{df['predicted_scores'].min():.3f}, {df['predicted_scores'].max():.3f}]")
+    print(f"Human scores - Mean: {df['human_scores'].mean():.3f}, "
+          f"Std: {df['human_scores'].std():.3f}, "
+          f"Range: [{df['human_scores'].min():.3f}, {df['human_scores'].max():.3f}]")
+    
+    # Show score distribution
+    print(f"\n📈 Score Distributions:")
+    print("Human scores distribution:")
+    print(df['human_scores'].value_counts().sort_index().head(10))
+    
+    # Create and display visualizations
+    print(f"\n🎨 Creating correlation visualizations...")
+    create_correlation_visualizations(df, dimension, len(df))
+    
+    # Save DataFrame for further analysis
+    csv_filename = f'correlation_data_{dimension}_{len(df)}samples.csv'
+    df.to_csv(csv_filename, index=False)
+    print(f"📄 Correlation data saved as: {csv_filename}")
