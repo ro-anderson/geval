@@ -73,6 +73,44 @@ class DatabaseManager:
             cursor.execute("SELECT * FROM metrics ORDER BY created_at DESC")
             return [dict_from_row(row) for row in cursor.fetchall()]
     
+    # MODELS Operations
+    @staticmethod
+    def create_model(name: str, provider: str) -> str:
+        """
+        Create a new LLM model configuration.
+        
+        Returns:
+            The UUID of the created model
+        """
+        model_id = str(uuid.uuid4())
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO models (id, name, provider)
+                VALUES (?, ?, ?)
+            """, (model_id, name, provider.lower()))
+            conn.commit()
+        
+        return model_id
+    
+    @staticmethod
+    def get_model(model_id: str) -> Optional[Dict[str, Any]]:
+        """Get model by ID."""
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM models WHERE id = ?", (model_id,))
+            row = cursor.fetchone()
+            return dict_from_row(row) if row else None
+    
+    @staticmethod
+    def list_models() -> List[Dict[str, Any]]:
+        """List all models."""
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM models ORDER BY provider, name")
+            return [dict_from_row(row) for row in cursor.fetchall()]
+    
     # CASES Operations  
     @staticmethod
     def create_case(
@@ -160,11 +198,26 @@ class DatabaseManager:
                 return doc
             return None
     
+    @staticmethod
+    def list_documents() -> List[Dict[str, Any]]:
+        """List all documents."""
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM eval_documents ORDER BY created_at DESC")
+            documents = []
+            for row in cursor.fetchall():
+                doc = dict_from_row(row)
+                # Parse metadata JSON
+                if doc['metadata']:
+                    doc['metadata'] = json.loads(doc['metadata'])
+                documents.append(doc)
+            return documents
+    
     # JUDGES Operations
     @staticmethod
     def create_judge(
         name: Optional[str],
-        model: str,
+        model_id: str,
         case_id: str,
         metric_id: str,
         parameters: Dict[str, Any],
@@ -182,24 +235,26 @@ class DatabaseManager:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO judges (id, name, model, case_id, metric_id, parameters, description)
+                INSERT INTO judges (id, name, model_id, case_id, metric_id, parameters, description)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (judge_id, name, model, case_id, metric_id, parameters_json, description))
+            """, (judge_id, name, model_id, case_id, metric_id, parameters_json, description))
             conn.commit()
         
         return judge_id
     
     @staticmethod
     def get_judge(judge_id: str) -> Optional[Dict[str, Any]]:
-        """Get judge by ID with associated case and metric data."""
+        """Get judge by ID with associated case, metric, and model data."""
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT j.*, c.name as case_name, c.task_introduction, c.evaluation_criteria,
-                       c.min_score, c.max_score, c.requires_reference, m.name as metric_name
+                       c.min_score, c.max_score, c.requires_reference, m.name as metric_name,
+                       mod.name as model_name, mod.provider as model_provider
                 FROM judges j
                 JOIN cases c ON j.case_id = c.id
                 JOIN metrics m ON j.metric_id = m.id
+                JOIN models mod ON j.model_id = mod.id
                 WHERE j.id = ?
             """, (judge_id,))
             row = cursor.fetchone()
@@ -212,14 +267,16 @@ class DatabaseManager:
     
     @staticmethod
     def list_judges() -> List[Dict[str, Any]]:
-        """List all judges with their case and metric info."""
+        """List all judges with their case, metric, and model info."""
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT j.*, c.name as case_name, m.name as metric_name
+                SELECT j.*, c.name as case_name, m.name as metric_name,
+                       mod.name as model_name, mod.provider as model_provider
                 FROM judges j
                 JOIN cases c ON j.case_id = c.id
                 JOIN metrics m ON j.metric_id = m.id
+                JOIN models mod ON j.model_id = mod.id
                 ORDER BY j.created_at DESC
             """)
             judges = []
@@ -228,6 +285,48 @@ class DatabaseManager:
                 judge['parameters'] = json.loads(judge['parameters'])
                 judges.append(judge)
             return judges
+    
+    @staticmethod
+    def update_judge(
+        judge_id: str,
+        name: Optional[str] = None,
+        parameters: Optional[Dict[str, Any]] = None,
+        description: Optional[str] = None
+    ) -> bool:
+        """
+        Update judge information (name, parameters, description).
+        Core relationships (model_id, case_id, metric_id) cannot be changed.
+        
+        Returns:
+            True if update was successful, False if judge not found
+        """
+        # Build dynamic update query
+        update_fields = []
+        update_values = []
+        
+        if name is not None:
+            update_fields.append("name = ?")
+            update_values.append(name)
+        
+        if parameters is not None:
+            update_fields.append("parameters = ?")
+            update_values.append(json.dumps(parameters))
+        
+        if description is not None:
+            update_fields.append("description = ?")
+            update_values.append(description)
+        
+        if not update_fields:
+            return True  # No updates needed
+        
+        update_values.append(judge_id)  # For WHERE clause
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            query = f"UPDATE judges SET {', '.join(update_fields)} WHERE id = ?"
+            cursor.execute(query, update_values)
+            conn.commit()
+            return cursor.rowcount > 0
     
     @staticmethod
     def create_run(
@@ -305,13 +404,14 @@ class DatabaseManager:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT r.*, j.name as judge_name, j.model, 
+                SELECT r.*, j.name as judge_name, mod.name as model_name, mod.provider as model_provider,
                        c.name as case_name, m.name as metric_name,
                        d.actual_output, d.expected_output
                 FROM runs r
                 JOIN judges j ON r.judge_id = j.id
                 JOIN cases c ON j.case_id = c.id
                 JOIN metrics m ON j.metric_id = m.id
+                JOIN models mod ON j.model_id = mod.id
                 JOIN eval_documents d ON r.document_id = d.id
                 WHERE r.id = ?
             """, (run_id,))
@@ -333,22 +433,26 @@ class DatabaseManager:
             cursor = conn.cursor()
             if judge_id:
                 cursor.execute("""
-                    SELECT r.*, j.name as judge_name, c.name as case_name, m.name as metric_name
+                    SELECT r.*, j.name as judge_name, c.name as case_name, m.name as metric_name,
+                           mod.name as model_name, mod.provider as model_provider
                     FROM runs r
                     JOIN judges j ON r.judge_id = j.id
                     JOIN cases c ON j.case_id = c.id
                     JOIN metrics m ON j.metric_id = m.id
+                    JOIN models mod ON j.model_id = mod.id
                     WHERE r.judge_id = ?
                     ORDER BY r.created_at DESC
                     LIMIT ?
                 """, (judge_id, limit))
             else:
                 cursor.execute("""
-                    SELECT r.*, j.name as judge_name, c.name as case_name, m.name as metric_name
+                    SELECT r.*, j.name as judge_name, c.name as case_name, m.name as metric_name,
+                           mod.name as model_name, mod.provider as model_provider
                     FROM runs r
                     JOIN judges j ON r.judge_id = j.id
                     JOIN cases c ON j.case_id = c.id
                     JOIN metrics m ON j.metric_id = m.id
+                    JOIN models mod ON j.model_id = mod.id
                     ORDER BY r.created_at DESC
                     LIMIT ?
                 """, (limit,))

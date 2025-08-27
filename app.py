@@ -62,6 +62,30 @@ class MetricResponse(BaseModel):
     name: str
     created_at: str
 
+class ModelCreateRequest(BaseModel):
+    """Request model for creating LLM model configurations."""
+    name: str = Field(..., description="Model name (e.g., 'gpt-4o-2024-08-06')")
+    provider: str = Field(..., description="Provider name (e.g., 'openai', 'anthropic')")
+    
+    @validator('name')
+    def name_must_be_valid(cls, v):
+        if not v.strip():
+            raise ValueError('name cannot be empty')
+        return v.strip()
+    
+    @validator('provider')
+    def provider_must_be_valid(cls, v):
+        if not v.strip():
+            raise ValueError('provider cannot be empty')
+        return v.strip().lower()
+
+class ModelResponse(BaseModel):
+    """Response model for LLM model configurations."""
+    id: str
+    name: str
+    provider: str
+    created_at: str
+
 class CaseCreateRequest(BaseModel):
     """Request model for creating evaluation cases."""
     name: str = Field(..., description="Unique name for the evaluation case (will be lowercased)")
@@ -97,13 +121,13 @@ class CaseResponse(BaseModel):
 class JudgeCreateRequest(BaseModel):
     """Request model for creating specialized judges."""
     name: Optional[str] = Field(None, description="Optional name for the judge")
-    model: str = Field(..., description="Model name (e.g., 'gpt-4o-2024-08-06')")
+    model_id: str = Field(..., description="ID of the LLM model to use")
     case_id: str = Field(..., description="ID of the evaluation case to judge")
     metric_id: str = Field(..., description="ID of the evaluation methodology to use")
     parameters: Dict[str, Any] = Field(..., description="Evaluation parameters")
     description: Optional[str] = Field(None, description="Optional judge description")
     
-    @validator('case_id', 'metric_id')
+    @validator('case_id', 'metric_id', 'model_id')
     def ids_must_be_uuid(cls, v):
         try:
             uuid.UUID(v)
@@ -115,7 +139,9 @@ class JudgeResponse(BaseModel):
     """Response model for specialized judges."""
     id: str
     name: Optional[str]
-    model: str
+    model_id: str
+    model_name: str
+    model_provider: str
     case_id: str
     metric_id: str
     case_name: str
@@ -123,6 +149,12 @@ class JudgeResponse(BaseModel):
     parameters: Dict[str, Any]
     description: Optional[str]
     created_at: str
+
+class JudgeUpdateRequest(BaseModel):
+    """Request model for updating judge configuration."""
+    name: Optional[str] = Field(None, description="Updated name for the judge")
+    parameters: Optional[Dict[str, Any]] = Field(None, description="Updated evaluation parameters")
+    description: Optional[str] = Field(None, description="Updated judge description")
 
 class DocumentCreateRequest(BaseModel):
     """Request model for creating evaluation documents."""
@@ -269,6 +301,67 @@ async def get_metric(metric_id: str):
         )
 
 # ===============================
+# Models Endpoints
+# ===============================
+
+@app.post("/models", response_model=ModelResponse, tags=["Models"])
+async def create_model(request: ModelCreateRequest):
+    """Create a new LLM model configuration."""
+    try:
+        model_id = DatabaseManager.create_model(name=request.name, provider=request.provider)
+        model = DatabaseManager.get_model(model_id)
+        
+        if not model:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create model"
+            )
+        
+        return ModelResponse(**model)
+    
+    except Exception as e:
+        if "UNIQUE constraint failed" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Model with name '{request.name}' already exists"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create model: {str(e)}"
+        )
+
+@app.get("/models", response_model=List[ModelResponse], tags=["Models"])
+async def list_models():
+    """List all LLM model configurations."""
+    try:
+        models = DatabaseManager.list_models()
+        return [ModelResponse(**model) for model in models]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve models: {str(e)}"
+        )
+
+@app.get("/models/{model_id}", response_model=ModelResponse, tags=["Models"])
+async def get_model(model_id: str):
+    """Get a specific LLM model configuration by ID."""
+    try:
+        model = DatabaseManager.get_model(model_id)
+        if not model:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Model not found"
+            )
+        return ModelResponse(**model)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve model: {str(e)}"
+        )
+
+# ===============================
 # Cases Endpoints
 # ===============================
 
@@ -385,7 +478,7 @@ async def list_documents():
 async def create_judge(request: JudgeCreateRequest):
     """Create a new specialized judge."""
     try:
-        # Verify case and metric exist
+        # Verify case, metric, and model exist
         case = DatabaseManager.get_case(request.case_id)
         if not case:
             raise HTTPException(
@@ -400,9 +493,16 @@ async def create_judge(request: JudgeCreateRequest):
                 detail="Metric not found"
             )
         
+        model = DatabaseManager.get_model(request.model_id)
+        if not model:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Model not found"
+            )
+        
         judge_id = DatabaseManager.create_judge(
             name=request.name,
-            model=request.model,
+            model_id=request.model_id,
             case_id=request.case_id,
             metric_id=request.metric_id,
             parameters=request.parameters,
@@ -436,6 +536,59 @@ async def list_judges():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve judges: {str(e)}"
+        )
+
+@app.put("/judges/{judge_id}", response_model=JudgeResponse, tags=["Judges"])
+async def update_judge(judge_id: str, request: JudgeUpdateRequest):
+    """Update judge configuration (name, parameters, description)."""
+    try:
+        # Validate judge_id format
+        try:
+            uuid.UUID(judge_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid judge ID format"
+            )
+        
+        # Check if judge exists
+        existing_judge = DatabaseManager.get_judge(judge_id)
+        if not existing_judge:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Judge not found"
+            )
+        
+        # Perform update
+        updated = DatabaseManager.update_judge(
+            judge_id=judge_id,
+            name=request.name,
+            parameters=request.parameters,
+            description=request.description
+        )
+        
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Judge not found"
+            )
+        
+        # Return updated judge
+        judge = DatabaseManager.get_judge(judge_id)
+        if not judge:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve updated judge"
+            )
+        
+        return JudgeResponse(**judge)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update judge: {str(e)}"
         )
 
 # ===============================
@@ -620,12 +773,15 @@ if __name__ == "__main__":
     print("   • GET  /          - Health check")
     print("   • POST /metrics   - Create evaluation methodologies") 
     print("   • GET  /metrics   - List evaluation methodologies")
+    print("   • POST /models    - Create LLM model configurations")
+    print("   • GET  /models    - List LLM model configurations")
     print("   • POST /cases     - Create evaluation cases")
     print("   • GET  /cases     - List evaluation cases")
     print("   • POST /documents - Create documents")
     print("   • GET  /documents - List documents")
     print("   • POST /judges    - Create specialized judges")
     print("   • GET  /judges    - List specialized judges")
+    print("   • PUT  /judges/{id} - Update judge parameters")
     print("   • POST /eval      - Run evaluations")
     print("   • GET  /runs      - List runs")
     print("   • GET  /docs      - API documentation")
