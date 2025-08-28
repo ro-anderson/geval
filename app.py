@@ -94,6 +94,7 @@ class CaseCreateRequest(BaseModel):
     min_score: int = Field(1, ge=1, description="Minimum score in the evaluation range")
     max_score: int = Field(5, ge=1, description="Maximum score in the evaluation range")
     requires_reference: bool = Field(False, description="Whether this case requires expected_output for comparison")
+    score_threshold: float = Field(0.5, ge=0.0, le=1.0, description="Pass/fail threshold for normalized scores (0.0-1.0)")
     
     @validator('max_score')
     def max_score_must_be_greater_than_min(cls, v, values):
@@ -116,6 +117,7 @@ class CaseResponse(BaseModel):
     min_score: int
     max_score: int
     requires_reference: bool
+    score_threshold: float
     created_at: str
 
 class JudgeCreateRequest(BaseModel):
@@ -211,6 +213,7 @@ class RunResponse(BaseModel):
     model_name: Optional[str]
     model_provider: Optional[str]
     status: str
+    evaluation_status: Optional[str]
     final_score: Optional[float]
     final_score_normalized: Optional[float]
     all_responses: Optional[List[float]]
@@ -378,7 +381,8 @@ async def create_case(request: CaseCreateRequest):
             evaluation_criteria=request.evaluation_criteria,
             min_score=request.min_score,
             max_score=request.max_score,
-            requires_reference=request.requires_reference
+            requires_reference=request.requires_reference,
+            score_threshold=request.score_threshold
         )
         
         case = DatabaseManager.get_case(case_id)

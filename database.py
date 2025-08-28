@@ -119,24 +119,32 @@ class DatabaseManager:
         evaluation_criteria: str,
         min_score: int = 1,
         max_score: int = 5,
-        requires_reference: bool = False
+        requires_reference: bool = False,
+        score_threshold: float = 0.5
     ) -> str:
         """
         Create a new evaluation case.
+        
+        Args:
+            score_threshold: Threshold for pass/fail evaluation (0.0-1.0, default 0.5)
         
         Returns:
             The UUID of the created case
         """
         case_id = str(uuid.uuid4())
         
+        # Validate score_threshold
+        if not 0.0 <= score_threshold <= 1.0:
+            raise ValueError("score_threshold must be between 0.0 and 1.0")
+        
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO cases (id, name, task_introduction, evaluation_criteria, 
-                                 min_score, max_score, requires_reference)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                                 min_score, max_score, requires_reference, score_threshold)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (case_id, name.lower(), task_introduction, evaluation_criteria, 
-                  min_score, max_score, requires_reference))
+                  min_score, max_score, requires_reference, score_threshold))
             conn.commit()
         
         return case_id
@@ -376,9 +384,28 @@ class DatabaseManager:
         prompt_used: str,
         metadata: Optional[Dict[str, Any]] = None
     ):
-        """Complete a run with results."""
+        """Complete a run with results and calculate evaluation status."""
         with get_db_connection() as conn:
             cursor = conn.cursor()
+            
+            # Get the score threshold from the case via judge
+            cursor.execute("""
+                SELECT c.score_threshold 
+                FROM runs r 
+                JOIN judges j ON r.judge_id = j.id 
+                JOIN cases c ON j.case_id = c.id 
+                WHERE r.id = ?
+            """, (run_id,))
+            
+            threshold_row = cursor.fetchone()
+            if threshold_row:
+                score_threshold = threshold_row[0]
+                # Determine evaluation status based on threshold
+                evaluation_status = 'pass' if final_score_normalized >= score_threshold else 'fail'
+            else:
+                # Fallback if threshold not found (shouldn't happen)
+                evaluation_status = 'pending'
+            
             cursor.execute("""
                 UPDATE runs SET 
                     status = 'completed',
@@ -391,6 +418,7 @@ class DatabaseManager:
                     execution_time_seconds = ?,
                     prompt_used = ?,
                     metadata = ?,
+                    evaluation_status = ?,
                     completed_at = ?
                 WHERE id = ?
             """, (
@@ -398,6 +426,7 @@ class DatabaseManager:
                 total_usage_tokens, prompt_tokens, completion_tokens,
                 execution_time_seconds, prompt_used,
                 json.dumps(metadata) if metadata else None,
+                evaluation_status,
                 datetime.utcnow().isoformat(),
                 run_id
             ))

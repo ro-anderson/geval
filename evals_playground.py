@@ -135,7 +135,7 @@ with tabs[0]:
         df_all_runs['started_at'] = pd.to_datetime(df_all_runs['started_at'])
         
         # Create filter columns
-        col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns(5)
+        col_f1, col_f2, col_f3, col_f4, col_f5, col_f6 = st.columns(6)
         
         with col_f1:
             # Judge filter
@@ -166,6 +166,15 @@ with tabs[0]:
             status_options = ["All Status"] + sorted(list(df_all_runs['status'].unique()))
             selected_status = st.selectbox("Status", status_options, key="dash_status_filter")
         
+        with col_f6:
+            # Evaluation Status filter
+            if 'evaluation_status' in df_all_runs.columns:
+                eval_status_options = ["All Results"] + sorted([x for x in df_all_runs['evaluation_status'].unique() if x is not None])
+                selected_eval_status = st.selectbox("Result", eval_status_options, key="dash_eval_status_filter")
+            else:
+                selected_eval_status = "All Results"
+                st.selectbox("Result", ["All Results"], key="dash_eval_status_filter", disabled=True, help="Evaluation status not available")
+        
         # Apply filters
         df_runs = df_all_runs.copy()
         
@@ -179,6 +188,8 @@ with tabs[0]:
             df_runs = df_runs[df_runs['model_name'] == selected_model]
         if selected_status != "All Status":
             df_runs = df_runs[df_runs['status'] == selected_status]
+        if selected_eval_status != "All Results" and 'evaluation_status' in df_runs.columns:
+            df_runs = df_runs[df_runs['evaluation_status'] == selected_eval_status]
         
         # Filter summary
         filter_active = any([
@@ -186,7 +197,8 @@ with tabs[0]:
             selected_case != "All Cases", 
             selected_metric != "All Metrics",
             selected_model != "All Models" and 'model_name' in df_runs.columns,
-            selected_status != "All Status"
+            selected_status != "All Status",
+            selected_eval_status != "All Results" and 'evaluation_status' in df_runs.columns
         ])
         
         if filter_active:
@@ -345,13 +357,14 @@ with tabs[0]:
             st.subheader("Recent Runs")
             recent_runs = df_runs.sort_values('started_at', ascending=False).head(10)
             st.dataframe(
-                recent_runs[['started_at', 'judge_name', 'case_name', 'final_score', 'status', 'execution_time_seconds']],
+                recent_runs[['started_at', 'judge_name', 'case_name', 'final_score', 'status', 'evaluation_status', 'execution_time_seconds']],
                 column_config={
                     "started_at": "Started At",
                     "judge_name": "Judge",
                     "case_name": "Case",
                     "final_score": "Score",
                     "status": "Status",
+                    "evaluation_status": "Result",
                     "execution_time_seconds": "Duration (s)"
                 },
                 width='stretch'
@@ -644,7 +657,7 @@ with tabs[2]:
                 task_intro = st.text_area("Task Introduction", placeholder="Describe the evaluation task...")
                 eval_criteria = st.text_area("Evaluation Criteria", placeholder="Specific criteria for evaluation...")
                 
-                col_score1, col_score2, col_target = st.columns(3)
+                col_score1, col_score2, col_target, col_threshold = st.columns(4)
                 with col_score1:
                     min_score = st.number_input("Min Score", 1, 10, 1)
                 with col_score2:
@@ -654,6 +667,15 @@ with tabs[2]:
                         "Target Required", 
                         value=False,
                         help="Enable if this case requires comparing actual output with expected output (reference)"
+                    )
+                with col_threshold:
+                    score_threshold = st.slider(
+                        "Pass Threshold",
+                        min_value=0.0,
+                        max_value=1.0,
+                        value=0.5,
+                        step=0.05,
+                        help="Minimum normalized score (0.0-1.0) required to pass evaluation"
                     )
                 
                 # Add explanation for the target field
@@ -670,7 +692,8 @@ with tabs[2]:
                             "evaluation_criteria": eval_criteria,
                             "min_score": min_score,
                             "max_score": max_score,
-                            "requires_reference": requires_reference
+                            "requires_reference": requires_reference,
+                            "score_threshold": score_threshold
                         }
                         with st.spinner("Creating case..."):
                             result = run_async_function(fetch_api_data("cases", "POST", case_data))
@@ -689,6 +712,7 @@ with tabs[2]:
                     st.write(f"**Task:** {case['task_introduction']}")
                     st.write(f"**Criteria:** {case['evaluation_criteria']}")
                     st.write(f"**Score Range:** {case['min_score']} - {case['max_score']}")
+                    st.write(f"**Pass Threshold:** {case.get('score_threshold', 0.5):.2f} ({case.get('score_threshold', 0.5)*100:.0f}%)")
                     
                     # Show target mode explanation
                     if case.get('requires_reference', False):
@@ -879,7 +903,15 @@ with tabs[4]:
                     st.subheader("Recent Runs")
                     latest_runs = df_runs.sort_values('started_at', ascending=False).head(5)
                     st.dataframe(
-                        latest_runs[['started_at', 'judge_name', 'case_name', 'final_score', 'status']],
+                        latest_runs[['started_at', 'judge_name', 'case_name', 'final_score', 'status', 'evaluation_status']],
+                        column_config={
+                            "started_at": "Started At",
+                            "judge_name": "Judge",
+                            "case_name": "Case",
+                            "final_score": "Score",
+                            "status": "Status",
+                            "evaluation_status": "Result"
+                        },
                         width='stretch'
                     )
                 else:
