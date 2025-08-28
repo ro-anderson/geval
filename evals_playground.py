@@ -138,9 +138,16 @@ with tabs[0]:
         col_f1, col_f2, col_f3, col_f4, col_f5, col_f6 = st.columns(6)
         
         with col_f1:
-            # Judge filter
-            judge_options = ["All Judges"] + sorted(list(df_all_runs['judge_name'].unique()))
-            selected_judge = st.selectbox("Judge", judge_options, key="dash_judge_filter")
+            # Judge filter with case information
+            judge_case_pairs = df_all_runs[['judge_name', 'case_name']].drop_duplicates()
+            judge_display_options = []
+            for _, row in judge_case_pairs.iterrows():
+                # Truncate case name if too long for better display
+                case_name_short = row['case_name'][:25] + "..." if len(row['case_name']) > 25 else row['case_name']
+                judge_display_options.append(f"{row['judge_name']} ({case_name_short})")
+            
+            judge_options = ["All Judges"] + sorted(judge_display_options)
+            selected_judge_display = st.selectbox("Judge", judge_options, key="dash_judge_filter")
         
         with col_f2:
             # Case filter
@@ -178,8 +185,12 @@ with tabs[0]:
         # Apply filters
         df_runs = df_all_runs.copy()
         
-        if selected_judge != "All Judges":
+        # Extract judge name from display format "Judge Name (Case Name)"
+        if selected_judge_display != "All Judges":
+            selected_judge = selected_judge_display.split(" (")[0]
             df_runs = df_runs[df_runs['judge_name'] == selected_judge]
+        else:
+            selected_judge = "All Judges"
         if selected_case != "All Cases":
             df_runs = df_runs[df_runs['case_name'] == selected_case]
         if selected_metric != "All Metrics":
