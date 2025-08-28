@@ -291,11 +291,12 @@ class DatabaseManager:
         judge_id: str,
         name: Optional[str] = None,
         parameters: Optional[Dict[str, Any]] = None,
-        description: Optional[str] = None
+        description: Optional[str] = None,
+        model_id: Optional[str] = None
     ) -> bool:
         """
-        Update judge information (name, parameters, description).
-        Core relationships (model_id, case_id, metric_id) cannot be changed.
+        Update judge information (name, parameters, description, model_id).
+        Case and metric relationships cannot be changed.
         
         Returns:
             True if update was successful, False if judge not found
@@ -315,6 +316,10 @@ class DatabaseManager:
         if description is not None:
             update_fields.append("description = ?")
             update_values.append(description)
+        
+        if model_id is not None:
+            update_fields.append("model_id = ?")
+            update_values.append(model_id)
         
         if not update_fields:
             return True  # No updates needed
@@ -434,12 +439,14 @@ class DatabaseManager:
             if judge_id:
                 cursor.execute("""
                     SELECT r.*, j.name as judge_name, c.name as case_name, m.name as metric_name,
-                           mod.name as model_name, mod.provider as model_provider
+                           mod.name as model_name, mod.provider as model_provider,
+                           d.actual_output, d.expected_output
                     FROM runs r
                     JOIN judges j ON r.judge_id = j.id
                     JOIN cases c ON j.case_id = c.id
                     JOIN metrics m ON j.metric_id = m.id
                     JOIN models mod ON j.model_id = mod.id
+                    JOIN eval_documents d ON r.document_id = d.id
                     WHERE r.judge_id = ?
                     ORDER BY r.created_at DESC
                     LIMIT ?
@@ -447,12 +454,14 @@ class DatabaseManager:
             else:
                 cursor.execute("""
                     SELECT r.*, j.name as judge_name, c.name as case_name, m.name as metric_name,
-                           mod.name as model_name, mod.provider as model_provider
+                           mod.name as model_name, mod.provider as model_provider,
+                           d.actual_output, d.expected_output
                     FROM runs r
                     JOIN judges j ON r.judge_id = j.id
                     JOIN cases c ON j.case_id = c.id
                     JOIN metrics m ON j.metric_id = m.id
                     JOIN models mod ON j.model_id = mod.id
+                    JOIN eval_documents d ON r.document_id = d.id
                     ORDER BY r.created_at DESC
                     LIMIT ?
                 """, (limit,))

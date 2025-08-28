@@ -155,6 +155,7 @@ class JudgeUpdateRequest(BaseModel):
     name: Optional[str] = Field(None, description="Updated name for the judge")
     parameters: Optional[Dict[str, Any]] = Field(None, description="Updated evaluation parameters")
     description: Optional[str] = Field(None, description="Updated judge description")
+    model_id: Optional[str] = Field(None, description="Updated model ID for the judge")
 
 class DocumentCreateRequest(BaseModel):
     """Request model for creating evaluation documents."""
@@ -207,6 +208,8 @@ class RunResponse(BaseModel):
     judge_name: Optional[str]
     case_name: str
     metric_name: str
+    model_name: Optional[str]
+    model_provider: Optional[str]
     status: str
     final_score: Optional[float]
     final_score_normalized: Optional[float]
@@ -540,7 +543,7 @@ async def list_judges():
 
 @app.put("/judges/{judge_id}", response_model=JudgeResponse, tags=["Judges"])
 async def update_judge(judge_id: str, request: JudgeUpdateRequest):
-    """Update judge configuration (name, parameters, description)."""
+    """Update judge configuration (name, parameters, description, model)."""
     try:
         # Validate judge_id format
         try:
@@ -559,12 +562,31 @@ async def update_judge(judge_id: str, request: JudgeUpdateRequest):
                 detail="Judge not found"
             )
         
+        # Validate model_id if provided
+        if request.model_id:
+            try:
+                uuid.UUID(request.model_id)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid model ID format"
+                )
+            
+            # Check if model exists
+            existing_model = DatabaseManager.get_model(request.model_id)
+            if not existing_model:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Model not found"
+                )
+        
         # Perform update
         updated = DatabaseManager.update_judge(
             judge_id=judge_id,
             name=request.name,
             parameters=request.parameters,
-            description=request.description
+            description=request.description,
+            model_id=request.model_id
         )
         
         if not updated:

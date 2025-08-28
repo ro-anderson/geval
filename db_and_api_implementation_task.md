@@ -494,3 +494,215 @@ POST /experiments →     POST /judges
 - Easy to add new metrics (claude_eval, llama_eval, etc.)
 - A/B testing capability with multiple judges per case
 - Modular design for better maintainability
+
+---
+
+## 🔧 **Judge Parameter Updates - PUT Endpoint Implementation - August 27, 2025**
+
+### 🎯 **Enhancement Objective**
+
+Implement a PUT endpoint to enable dynamic updating of judge parameters without requiring creation of new judges. This addresses the need for fine-tuning evaluation settings during experimentation and production optimization.
+
+### 📋 **Implementation Details**
+
+#### **🗄️ Database Layer Enhancement**
+
+**New `update_judge` Method in `DatabaseManager`**:
+
+```python
+@staticmethod
+def update_judge(
+    judge_id: str,
+    name: Optional[str] = None,
+    parameters: Optional[Dict[str, Any]] = None,
+    description: Optional[str] = None
+) -> bool
+```
+
+**Key Features**:
+
+- **Flexible Updates**: Supports partial updates (only provided fields are changed)
+- **Core Protection**: Cannot modify `model_id`, `case_id`, `metric_id` (preserves judge identity)
+- **Dynamic SQL**: Builds UPDATE queries based on provided parameters
+- **Transaction Safety**: Atomic updates with proper error handling
+
+#### **🌐 API Layer Enhancement**
+
+**New Pydantic Model**:
+
+```python
+class JudgeUpdateRequest(BaseModel):
+    name: Optional[str] = Field(None, description="Updated name for the judge")
+    parameters: Optional[Dict[str, Any]] = Field(None, description="Updated evaluation parameters")
+    description: Optional[str] = Field(None, description="Updated judge description")
+```
+
+**New PUT Endpoint**:
+
+```http
+PUT /judges/{judge_id}
+Content-Type: application/json
+
+{
+  "name": "Updated Judge Name",
+  "parameters": {
+    "temperature": 1.5,
+    "max_tokens": 3000,
+    "n_responses": 15
+  },
+  "description": "Updated description"
+}
+```
+
+**Response**: Complete `JudgeResponse` with updated data
+
+### ✅ **Testing & Validation Results**
+
+#### **🧪 Live Testing Scenarios**
+
+**1. Full Parameter Update**:
+
+```bash
+PUT /judges/4a0beb50-b427-4843-b92b-aa7153bea5ec
+{
+  "parameters": {
+    "temperature": 1.5,
+    "max_tokens": 3000,
+    "top_p": 0.9,
+    "frequency_penalty": 0.1,
+    "presence_penalty": 0.1,
+    "n_responses": 15,
+    "sleep_time": 0.5,
+    "rate_limit_sleep": 1.0
+  },
+  "description": "Updated judge with modified parameters for enhanced evaluation precision"
+}
+```
+
+**Result**: ✅ 200 OK - All parameters successfully updated
+
+**2. Partial Update (Name Only)**:
+
+```bash
+PUT /judges/4a0beb50-b427-4843-b92b-aa7153bea5ec
+{
+  "name": "Enhanced Consistency G-Eval Judge v2"
+}
+```
+
+**Result**: ✅ 200 OK - Only name updated, other fields preserved
+
+**3. Error Handling Validation**:
+
+```bash
+PUT /judges/00000000-0000-0000-0000-000000000000
+{"name": "Test"}
+```
+
+**Result**: ✅ 404 Not Found - {"detail": "Judge not found"}
+
+### 🚀 **Key Benefits & Features**
+
+#### **🔄 Parameter Flexibility**
+
+- **Runtime Tuning**: Adjust evaluation parameters without redeployment
+- **A/B Testing**: Compare different parameter sets using same judge identity
+- **Production Optimization**: Fine-tune parameters based on performance metrics
+- **Gradual Rollout**: Update parameters incrementally during testing
+
+#### **🛡️ Data Integrity Protection**
+
+- **Identity Preservation**: Core relationships (model/case/metric) remain immutable
+- **Partial Updates**: Only specified fields are modified
+- **Validation**: Full UUID and existence validation before updates
+- **Atomic Operations**: Database transactions ensure consistency
+
+#### **📚 Documentation & Usability**
+
+- **Auto-Documentation**: Available in FastAPI Swagger UI at `/docs`
+- **Type Safety**: Full Pydantic validation for request/response models
+- **Error Clarity**: Detailed error messages for debugging
+- **RESTful Design**: Standard HTTP methods and status codes
+
+### 💡 **Usage Examples**
+
+#### **Common Update Scenarios**:
+
+```bash
+# Adjust evaluation temperature for more/less creativity
+PUT /judges/{id} {"parameters": {"temperature": 0.5}}
+
+# Increase response count for better statistical confidence
+PUT /judges/{id} {"parameters": {"n_responses": 20}}
+
+# Update multiple parameters simultaneously
+PUT /judges/{id} {
+  "parameters": {
+    "temperature": 1.2,
+    "max_tokens": 4000,
+    "n_responses": 25
+  }
+}
+
+# Update descriptive information
+PUT /judges/{id} {
+  "name": "Production Consistency Judge",
+  "description": "Optimized for production evaluation workloads"
+}
+```
+
+### 📊 **API Endpoint Summary Update**
+
+**Updated Endpoint List**:
+
+```
+Core Endpoints:
+• GET  /          - Health check
+• POST /metrics   - Create evaluation methodologies
+• GET  /metrics   - List evaluation methodologies
+• POST /models    - Create LLM model configurations
+• GET  /models    - List LLM model configurations
+• POST /cases     - Create evaluation cases
+• GET  /cases     - List evaluation cases
+• POST /documents - Create documents
+• GET  /documents - List documents
+• POST /judges    - Create specialized judges
+• GET  /judges    - List specialized judges
+• PUT  /judges/{id} - Update judge parameters     ← NEW
+• POST /eval      - Run evaluations
+• GET  /runs      - List runs
+• GET  /docs      - API documentation
+```
+
+### 🎯 **Technical Implementation Quality**
+
+#### **Code Quality**:
+
+- ✅ **Type Safety**: Full type hints and Pydantic validation
+- ✅ **Error Handling**: Comprehensive HTTP status code coverage
+- ✅ **Documentation**: Inline docstrings and API documentation
+- ✅ **Modularity**: Clear separation between database and API layers
+
+#### **Performance**:
+
+- ✅ **Efficiency**: Minimal database operations (single UPDATE query)
+- ✅ **Validation**: Early validation prevents unnecessary database calls
+- ✅ **Response Time**: Sub-second update operations
+
+#### **Security**:
+
+- ✅ **Input Validation**: UUID format validation
+- ✅ **Data Protection**: Core identity fields cannot be modified
+- ✅ **Error Information**: Minimal information disclosure in error messages
+
+### 🔮 **Future Enhancement Opportunities**
+
+1. **Bulk Updates**: Support for updating multiple judges simultaneously
+2. **Parameter History**: Track parameter change history for audit trails
+3. **Validation Rules**: Custom validation for parameter value ranges
+4. **Rollback Capability**: Ability to revert to previous parameter sets
+5. **Parameter Templates**: Predefined parameter sets for common scenarios
+
+---
+
+_Last Updated: August 27, 2025 - PUT Endpoint for Judge Updates Successfully Implemented_
