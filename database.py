@@ -342,6 +342,67 @@ class DatabaseManager:
             return cursor.rowcount > 0
     
     @staticmethod
+    def update_case(
+        case_id: str,
+        name: Optional[str] = None,
+        task_introduction: Optional[str] = None,
+        evaluation_criteria: Optional[str] = None,
+        min_score: Optional[int] = None,
+        max_score: Optional[int] = None,
+        requires_reference: Optional[bool] = None,
+        score_threshold: Optional[float] = None
+    ) -> bool:
+        """
+        Update case information.
+        
+        Returns:
+            True if update was successful, False if case not found
+        """
+        # Build dynamic update query
+        update_fields = []
+        update_values = []
+        
+        if name is not None:
+            update_fields.append("name = ?")
+            update_values.append(name.lower())
+        
+        if task_introduction is not None:
+            update_fields.append("task_introduction = ?")
+            update_values.append(task_introduction)
+        
+        if evaluation_criteria is not None:
+            update_fields.append("evaluation_criteria = ?")
+            update_values.append(evaluation_criteria)
+        
+        if min_score is not None:
+            update_fields.append("min_score = ?")
+            update_values.append(min_score)
+        
+        if max_score is not None:
+            update_fields.append("max_score = ?")
+            update_values.append(max_score)
+        
+        if requires_reference is not None:
+            update_fields.append("requires_reference = ?")
+            update_values.append(requires_reference)
+        
+        if score_threshold is not None:
+            update_fields.append("score_threshold = ?")
+            update_values.append(score_threshold)
+        
+        if not update_fields:
+            return True  # No updates needed
+        
+        update_values.append(case_id)  # For WHERE clause
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            query = f"UPDATE cases SET {', '.join(update_fields)} WHERE id = ?"
+            cursor.execute(query, update_values)
+            conn.commit()
+            return cursor.rowcount > 0
+    
+    @staticmethod
     def create_run(
         judge_id: str,
         document_id: str

@@ -264,24 +264,48 @@ with tabs[0]:
             st.subheader("Analytics")
             
             # Main performance chart
-            hover_data_cols = ['case_name', 'total_usage_tokens']
+            hover_data_cols = ['case_name', 'total_usage_tokens', 'evaluation_status']
             if 'model_name' in df_runs.columns:
                 hover_data_cols.append('model_name')
             
             fig_main = px.scatter(df_runs,
                                 x='started_at',
-                                y='final_score',
-                                color='judge_name',
+                                y='final_score_normalized',
+                                color='evaluation_status',
                                 size='execution_time_seconds',
-                                symbol='status',
+                                symbol='judge_name',
                                 hover_data=hover_data_cols,
                                 title="Evaluation Performance Over Time",
-                                height=500)
+                                height=500,
+                                color_discrete_map={
+                                    'pass': '#2ca02c',   # Green for pass
+                                    'fail': '#d62728',   # Red for fail
+                                    'pending': '#ff7f0e'  # Orange for pending
+                                })
+            
+            # Add threshold line if specific case is selected
+            if selected_case != "All Cases":
+                # Get the threshold for the selected case
+                case_data = run_async_function(fetch_api_data("cases"))
+                if case_data:
+                    selected_case_obj = next((c for c in case_data if c['name'] == selected_case), None)
+                    if selected_case_obj and 'score_threshold' in selected_case_obj:
+                        threshold = selected_case_obj['score_threshold']
+                        # Add horizontal line at threshold
+                        fig_main.add_hline(
+                            y=threshold,
+                            line_dash="dash",
+                            line_color="black",
+                            line_width=2,
+                            annotation_text=f"Pass Threshold: {threshold:.2f}",
+                            annotation_position="top right"
+                        )
             
             fig_main.update_layout(
                 xaxis_title="Time",
-                yaxis_title="Final Score",
-                margin=dict(l=0, r=0, t=40, b=0)
+                yaxis_title="Normalized Score (0-1)",
+                margin=dict(l=0, r=0, t=40, b=0),
+                yaxis=dict(range=[0, 1])  # Fix y-axis to 0-1 range
             )
             
             st.plotly_chart(fig_main, width='stretch')
@@ -508,8 +532,35 @@ with tabs[1]:
         
         judges = run_async_function(fetch_api_data("judges"))
         if judges:
-            for judge in judges:
-                with st.expander(f"{judge['name']}"):
+            # Add metric filter
+            metrics_in_judges = list(set([judge['metric_name'] for judge in judges]))
+            metric_filter_options = ["All Metrics"] + sorted(metrics_in_judges)
+            selected_metric_filter = st.selectbox(
+                "Filter by Metric", 
+                options=metric_filter_options, 
+                key="judge_metric_filter",
+                help="Filter judges by their evaluation metric"
+            )
+            
+            # Filter judges based on selected metric
+            if selected_metric_filter != "All Metrics":
+                filtered_judges = [judge for judge in judges if judge['metric_name'] == selected_metric_filter]
+            else:
+                filtered_judges = judges
+            
+            # Display filtered judges count
+            if selected_metric_filter != "All Metrics":
+                st.write(f"*Showing {len(filtered_judges)} judges for metric: {selected_metric_filter}*")
+            
+            if not filtered_judges:
+                st.info(f"No judges found for metric: {selected_metric_filter}")
+            
+            for judge in filtered_judges:
+                # Always include case name in title to differentiate same-named judges
+                case_name_short = judge['case_name'][:25] + "..." if len(judge['case_name']) > 25 else judge['case_name']
+                expander_title = f"{judge['name']} ({case_name_short})"
+                
+                with st.expander(expander_title):
                     col_info1, col_info2 = st.columns(2)
                     
                     with col_info1:
@@ -730,6 +781,91 @@ with tabs[2]:
                         st.info("**Target Mode**: Compares actual vs expected output")
                     else:
                         st.info("**Direct Mode**: Evaluates actual output independently")
+                    
+                    # Update button
+                    if st.button(f"Update Case", key=f"update_case_{case['id']}"):
+                        st.session_state[f"show_case_update_{case['id']}"] = True
+                    
+                    # Update form
+                    if st.session_state.get(f"show_case_update_{case['id']}", False):
+                        with st.form(f"case_update_form_{case['id']}"):
+                            st.write("**Update Case Configuration:**")
+                            
+                            # Basic information
+                            updated_name = st.text_input("Case Name", value=case['name'], key=f"case_name_{case['id']}")
+                            updated_task_intro = st.text_area("Task Introduction", value=case['task_introduction'], key=f"case_task_{case['id']}")
+                            updated_eval_criteria = st.text_area("Evaluation Criteria", value=case['evaluation_criteria'], key=f"case_criteria_{case['id']}")
+                            
+                            # Score configuration
+                            col_update1, col_update2, col_update3, col_update4 = st.columns(4)
+                            with col_update1:
+                                updated_min_score = st.number_input(
+                                    "Min Score", 
+                                    min_value=1, 
+                                    max_value=10, 
+                                    value=case['min_score'], 
+                                    key=f"case_min_{case['id']}"
+                                )
+                            with col_update2:
+                                updated_max_score = st.number_input(
+                                    "Max Score", 
+                                    min_value=1, 
+                                    max_value=10, 
+                                    value=case['max_score'], 
+                                    key=f"case_max_{case['id']}"
+                                )
+                            with col_update3:
+                                updated_requires_reference = st.toggle(
+                                    "Target Required", 
+                                    value=case.get('requires_reference', False), 
+                                    key=f"case_ref_{case['id']}",
+                                    help="Enable if this case requires comparing actual output with expected output"
+                                )
+                            with col_update4:
+                                updated_score_threshold = st.slider(
+                                    "Pass Threshold",
+                                    min_value=0.0,
+                                    max_value=1.0,
+                                    value=float(case.get('score_threshold', 0.5)),
+                                    step=0.05,
+                                    key=f"case_threshold_{case['id']}",
+                                    help="Minimum normalized score required to pass"
+                                )
+                            
+                            # Form buttons
+                            col_btn1, col_btn2 = st.columns(2)
+                            with col_btn1:
+                                update_case_submit = st.form_submit_button("Update Case")
+                            with col_btn2:
+                                cancel_case_update = st.form_submit_button("Cancel")
+                            
+                            if update_case_submit:
+                                if updated_name and updated_task_intro and updated_eval_criteria:
+                                    if updated_min_score <= updated_max_score:
+                                        case_update_data = {
+                                            "name": updated_name,
+                                            "task_introduction": updated_task_intro,
+                                            "evaluation_criteria": updated_eval_criteria,
+                                            "min_score": updated_min_score,
+                                            "max_score": updated_max_score,
+                                            "requires_reference": updated_requires_reference,
+                                            "score_threshold": updated_score_threshold
+                                        }
+                                        
+                                        with st.spinner("Updating case..."):
+                                            result = run_async_function(fetch_api_data(f"cases/{case['id']}", "PUT", case_update_data))
+                                            if result:
+                                                st.success("Case updated successfully!")
+                                                st.session_state[f"show_case_update_{case['id']}"] = False
+                                                st.rerun()
+                                    else:
+                                        st.error("Min score must be less than or equal to max score")
+                                else:
+                                    st.error("Please fill in all required fields")
+                            
+                            if cancel_case_update:
+                                st.session_state[f"show_case_update_{case['id']}"] = False
+                                st.rerun()
 
 # Documents Tab
 with tabs[3]:
@@ -781,59 +917,68 @@ with tabs[4]:
     with col1:
         st.subheader("Run New Evaluation")
         
-        with st.form("run_evaluation_form"):
-            # Fetch data for dropdowns
-            judges = run_async_function(fetch_api_data("judges")) or []
-            cases = run_async_function(fetch_api_data("cases")) or []
-            documents = run_async_function(fetch_api_data("documents")) or []
+        # Fetch data for dropdowns (outside form for immediate updates)
+        judges = run_async_function(fetch_api_data("judges")) or []
+        cases = run_async_function(fetch_api_data("cases")) or []
+        documents = run_async_function(fetch_api_data("documents")) or []
+        
+        # Step 1: Select Case (outside form for immediate filtering)
+        if cases:
+            case_options = {case['name']: case['id'] for case in cases}
+            selected_case = st.selectbox("Select Case", options=list(case_options.keys()), key="eval_case_selector")
+            selected_case_id = case_options[selected_case] if selected_case else None
+        else:
+            st.warning("No cases available. Create a case first.")
+            selected_case_id = None
+        
+        # Step 2: Select Judge (filtered by case, outside form for immediate updates)
+        if judges and selected_case_id:
+            # Filter judges by selected case
+            filtered_judges = [judge for judge in judges if judge['case_id'] == selected_case_id]
             
-            # Step 1: Select Case
-            if cases:
-                case_options = {case['name']: case['id'] for case in cases}
-                selected_case = st.selectbox("Select Case", options=list(case_options.keys()))
-                selected_case_id = case_options[selected_case] if selected_case else None
-            else:
-                st.warning("No cases available. Create a case first.")
-                selected_case_id = None
-            
-            # Step 2: Select Judge (filtered by case)
-            if judges and selected_case_id:
-                # Filter judges by selected case
-                filtered_judges = [judge for judge in judges if judge['case_id'] == selected_case_id]
+            if filtered_judges:
+                judge_options = {}
+                for judge in filtered_judges:
+                    case_name_short = judge['case_name'][:25] + "..." if len(judge['case_name']) > 25 else judge['case_name']
+                    judge_display = f"{judge['name']} ({case_name_short})"
+                    judge_options[judge_display] = judge['id']
                 
-                if filtered_judges:
-                    judge_options = {f"{judge['name']} (Model: {judge['model_name']})": judge['id'] for judge in filtered_judges}
-                    selected_judge = st.selectbox("Select Judge", options=list(judge_options.keys()))
-                    judge_id = judge_options[selected_judge] if selected_judge else None
-                else:
-                    st.warning(f"No judges available for case '{selected_case}'. Create a judge for this case first.")
-                    judge_id = None
+                selected_judge = st.selectbox("Select Judge", options=list(judge_options.keys()), key="eval_judge_selector")
+                judge_id = judge_options[selected_judge] if selected_judge else None
             else:
-                st.warning("Select a case first to see available judges.")
+                st.warning(f"No judges available for case '{selected_case}'. Create a judge for this case first.")
                 judge_id = None
-            
-            # Step 3: Select Document
-            if documents:
-                doc_options = {f"Document {i+1} ({doc['actual_output'][:50]}...)": doc['id'] for i, doc in enumerate(documents)}
-                selected_doc = st.selectbox("Select Document", options=list(doc_options.keys()))
-                document_id = doc_options[selected_doc] if selected_doc else None
-            else:
-                st.warning("No documents available. Create a document first.")
-                document_id = None
-            
-            if st.form_submit_button("Run Evaluation", type="primary"):
-                if judge_id and document_id:
-                    eval_data = {
-                        "judge_id": judge_id,
-                        "document_id": document_id
-                    }
-                    
-                    with st.spinner("Running evaluation... This may take a while."):
-                        result = run_async_function(fetch_api_data("eval", "POST", eval_data))
-                        if result:
-                            st.success("Evaluation completed!")
-                            st.json(result)
-                            st.rerun()
+        else:
+            st.warning("Select a case first to see available judges.")
+            judge_id = None
+        
+        # Step 3: Document selection and submission (in form)
+        if judge_id:  # Only show document selection if judge is selected
+            with st.form("run_evaluation_form"):
+                # Step 3: Select Document
+                if documents:
+                    doc_options = {f"Document {i+1} ({doc['actual_output'][:50]}...)": doc['id'] for i, doc in enumerate(documents)}
+                    selected_doc = st.selectbox("Select Document", options=list(doc_options.keys()))
+                    document_id = doc_options[selected_doc] if selected_doc else None
+                else:
+                    st.warning("No documents available. Create a document first.")
+                    document_id = None
+                
+                if st.form_submit_button("Run Evaluation", type="primary"):
+                    if judge_id and document_id:
+                        eval_data = {
+                            "judge_id": judge_id,
+                            "document_id": document_id
+                        }
+                        
+                        with st.spinner("Running evaluation... This may take a while."):
+                            result = run_async_function(fetch_api_data("eval", "POST", eval_data))
+                            if result:
+                                st.success("Evaluation completed!")
+                                st.json(result)
+                                st.rerun()
+        else:
+            st.info("Please select a case and judge first to proceed with document selection.")
     
     with col2:
         st.subheader("Evaluation Results")

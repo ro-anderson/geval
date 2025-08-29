@@ -159,6 +159,16 @@ class JudgeUpdateRequest(BaseModel):
     description: Optional[str] = Field(None, description="Updated judge description")
     model_id: Optional[str] = Field(None, description="Updated model ID for the judge")
 
+class CaseUpdateRequest(BaseModel):
+    """Request model for updating case configuration."""
+    name: Optional[str] = Field(None, description="Updated name for the case")
+    task_introduction: Optional[str] = Field(None, description="Updated task introduction")
+    evaluation_criteria: Optional[str] = Field(None, description="Updated evaluation criteria")
+    min_score: Optional[int] = Field(None, ge=1, le=10, description="Updated minimum score")
+    max_score: Optional[int] = Field(None, ge=1, le=10, description="Updated maximum score")
+    requires_reference: Optional[bool] = Field(None, description="Updated reference requirement")
+    score_threshold: Optional[float] = Field(None, ge=0.0, le=1.0, description="Updated pass/fail threshold")
+
 class DocumentCreateRequest(BaseModel):
     """Request model for creating evaluation documents."""
     actual_output: str = Field(..., description="The output being evaluated")
@@ -434,6 +444,70 @@ async def get_case(case_id: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve case: {str(e)}"
+        )
+
+@app.put("/cases/{case_id}", response_model=CaseResponse, tags=["Cases"])
+async def update_case(case_id: str, request: CaseUpdateRequest):
+    """Update case configuration (name, criteria, scores, threshold, etc.)."""
+    try:
+        # Validate case_id format
+        try:
+            uuid.UUID(case_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid case ID format"
+            )
+        
+        # Check if case exists
+        existing_case = DatabaseManager.get_case(case_id)
+        if not existing_case:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Case not found"
+            )
+        
+        # Validate min_score <= max_score if both provided
+        if request.min_score is not None and request.max_score is not None:
+            if request.min_score > request.max_score:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="min_score must be less than or equal to max_score"
+                )
+        
+        # Perform update
+        updated = DatabaseManager.update_case(
+            case_id=case_id,
+            name=request.name,
+            task_introduction=request.task_introduction,
+            evaluation_criteria=request.evaluation_criteria,
+            min_score=request.min_score,
+            max_score=request.max_score,
+            requires_reference=request.requires_reference,
+            score_threshold=request.score_threshold
+        )
+        
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Case not found"
+            )
+        
+        # Return updated case
+        case = DatabaseManager.get_case(case_id)
+        if not case:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve updated case"
+            )
+        
+        return CaseResponse(**case)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update case: {str(e)}"
         )
 
 # ===============================
