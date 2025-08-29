@@ -169,6 +169,18 @@ class CaseUpdateRequest(BaseModel):
     requires_reference: Optional[bool] = Field(None, description="Updated reference requirement")
     score_threshold: Optional[float] = Field(None, ge=0.0, le=1.0, description="Updated pass/fail threshold")
 
+class ThresholdResponse(BaseModel):
+    """Response model for threshold records."""
+    id: str
+    score: float
+    created_at: str
+
+class ThresholdHistoryResponse(BaseModel):
+    """Response model for threshold history of a case."""
+    case_id: str
+    case_name: str
+    thresholds: List[ThresholdResponse]
+
 class DocumentCreateRequest(BaseModel):
     """Request model for creating evaluation documents."""
     actual_output: str = Field(..., description="The output being evaluated")
@@ -508,6 +520,66 @@ async def update_case(case_id: str, request: CaseUpdateRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update case: {str(e)}"
+        )
+
+# ===============================
+# Thresholds Endpoints
+# ===============================
+
+@app.get("/thresholds", response_model=List[ThresholdResponse], tags=["Thresholds"])
+async def list_thresholds():
+    """List all threshold records."""
+    try:
+        thresholds = DatabaseManager.list_thresholds()
+        return [ThresholdResponse(**threshold) for threshold in thresholds]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve thresholds: {str(e)}"
+        )
+
+@app.get("/cases/{case_id}/thresholds", response_model=ThresholdHistoryResponse, tags=["Thresholds"])
+async def get_case_threshold_history(case_id: str):
+    """Get threshold history for a specific case."""
+    try:
+        # Validate case_id format
+        try:
+            uuid.UUID(case_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid case ID format"
+            )
+        
+        # Check if case exists
+        case = DatabaseManager.get_case(case_id)
+        if not case:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Case not found"
+            )
+        
+        # Get threshold history (for now, just current threshold since we migrated)
+        # In the future, this could show historical threshold changes
+        current_threshold = DatabaseManager.get_threshold(case.get('threshold_id'))
+        
+        if current_threshold:
+            thresholds = [ThresholdResponse(**current_threshold)]
+        else:
+            thresholds = []
+        
+        return ThresholdHistoryResponse(
+            case_id=case_id,
+            case_name=case['name'],
+            thresholds=thresholds
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve case threshold history: {str(e)}"
         )
 
 # ===============================
@@ -877,6 +949,9 @@ if __name__ == "__main__":
     print("   • GET  /models    - List LLM model configurations")
     print("   • POST /cases     - Create evaluation cases")
     print("   • GET  /cases     - List evaluation cases")
+    print("   • PUT  /cases/{id} - Update evaluation cases")
+    print("   • GET  /thresholds - List threshold records")
+    print("   • GET  /cases/{id}/thresholds - Get case threshold history")
     print("   • POST /documents - Create documents")
     print("   • GET  /documents - List documents")
     print("   • POST /judges    - Create specialized judges")

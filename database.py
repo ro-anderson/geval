@@ -111,6 +111,61 @@ class DatabaseManager:
             cursor.execute("SELECT * FROM models ORDER BY provider, name")
             return [dict_from_row(row) for row in cursor.fetchall()]
     
+    # THRESHOLDS Operations
+    @staticmethod
+    def create_threshold(score: float) -> str:
+        """
+        Create a new threshold record.
+        
+        Args:
+            score: Threshold score (0.0-1.0)
+        
+        Returns:
+            The UUID of the created threshold
+        """
+        threshold_id = str(uuid.uuid4())
+        
+        # Validate score
+        if not 0.0 <= score <= 1.0:
+            raise ValueError("threshold score must be between 0.0 and 1.0")
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO thresholds (id, score, created_at)
+                VALUES (?, ?, ?)
+            """, (threshold_id, score, datetime.utcnow().isoformat()))
+            conn.commit()
+        
+        return threshold_id
+    
+    @staticmethod
+    def get_threshold(threshold_id: str) -> Optional[Dict[str, Any]]:
+        """Get threshold by ID."""
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM thresholds WHERE id = ?", (threshold_id,))
+            row = cursor.fetchone()
+            return dict_from_row(row) if row else None
+    
+    @staticmethod
+    def list_thresholds(case_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List thresholds, optionally filtered by case."""
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            if case_id:
+                # Get threshold history for a specific case
+                cursor.execute("""
+                    SELECT t.*, c.name as case_name
+                    FROM thresholds t
+                    JOIN cases c ON c.threshold_id = t.id
+                    WHERE c.id = ?
+                    ORDER BY t.created_at DESC
+                """, (case_id,))
+            else:
+                cursor.execute("SELECT * FROM thresholds ORDER BY created_at DESC")
+            return [dict_from_row(row) for row in cursor.fetchall()]
+
     # CASES Operations  
     @staticmethod
     def create_case(
@@ -133,37 +188,46 @@ class DatabaseManager:
         """
         case_id = str(uuid.uuid4())
         
-        # Validate score_threshold
-        if not 0.0 <= score_threshold <= 1.0:
-            raise ValueError("score_threshold must be between 0.0 and 1.0")
+        # Create threshold first
+        threshold_id = DatabaseManager.create_threshold(score_threshold)
         
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO cases (id, name, task_introduction, evaluation_criteria, 
-                                 min_score, max_score, requires_reference, score_threshold)
+                                 min_score, max_score, requires_reference, threshold_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (case_id, name.lower(), task_introduction, evaluation_criteria, 
-                  min_score, max_score, requires_reference, score_threshold))
+                  min_score, max_score, requires_reference, threshold_id))
             conn.commit()
         
         return case_id
     
     @staticmethod
     def get_case(case_id: str) -> Optional[Dict[str, Any]]:
-        """Get case by ID."""
+        """Get case by ID with current threshold."""
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM cases WHERE id = ?", (case_id,))
+            cursor.execute("""
+                SELECT c.*, t.score as score_threshold
+                FROM cases c
+                JOIN thresholds t ON c.threshold_id = t.id
+                WHERE c.id = ?
+            """, (case_id,))
             row = cursor.fetchone()
             return dict_from_row(row) if row else None
     
     @staticmethod
     def list_cases() -> List[Dict[str, Any]]:
-        """List all cases."""
+        """List all cases with current thresholds."""
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM cases ORDER BY created_at DESC")
+            cursor.execute("""
+                SELECT c.*, t.score as score_threshold
+                FROM cases c
+                JOIN thresholds t ON c.threshold_id = t.id
+                ORDER BY c.created_at DESC
+            """)
             return [dict_from_row(row) for row in cursor.fetchall()]
     
     @staticmethod
@@ -353,11 +417,17 @@ class DatabaseManager:
         score_threshold: Optional[float] = None
     ) -> bool:
         """
-        Update case information.
+        Update case information. Creates new threshold record if score_threshold changes.
         
         Returns:
             True if update was successful, False if case not found
         """
+        # Handle threshold update separately if provided
+        threshold_id = None
+        if score_threshold is not None:
+            # Create new threshold record for historical tracking
+            threshold_id = DatabaseManager.create_threshold(score_threshold)
+        
         # Build dynamic update query
         update_fields = []
         update_values = []
@@ -386,9 +456,9 @@ class DatabaseManager:
             update_fields.append("requires_reference = ?")
             update_values.append(requires_reference)
         
-        if score_threshold is not None:
-            update_fields.append("score_threshold = ?")
-            update_values.append(score_threshold)
+        if threshold_id is not None:
+            update_fields.append("threshold_id = ?")
+            update_values.append(threshold_id)
         
         if not update_fields:
             return True  # No updates needed
@@ -449,12 +519,13 @@ class DatabaseManager:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             
-            # Get the score threshold from the case via judge
+            # Get the score threshold from the thresholds table via case and judge
             cursor.execute("""
-                SELECT c.score_threshold 
+                SELECT t.score 
                 FROM runs r 
                 JOIN judges j ON r.judge_id = j.id 
                 JOIN cases c ON j.case_id = c.id 
+                JOIN thresholds t ON c.threshold_id = t.id
                 WHERE r.id = ?
             """, (run_id,))
             

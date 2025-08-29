@@ -624,20 +624,20 @@ with tabs[1]:
                             
                             col_param1, col_param2 = st.columns(2)
                             with col_param1:
-                                new_temperature = st.slider("Temperature", 0.0, 2.0, current_params.get('temperature', 2.0), 0.1, key=f"temp_{judge['id']}")
-                                new_max_tokens = st.number_input("Max Tokens", 100, 5000, current_params.get('max_tokens', 2500), key=f"tokens_{judge['id']}")
-                                new_top_p = st.slider("Top P", 0.0, 1.0, current_params.get('top_p', 1.0), 0.1, key=f"top_p_{judge['id']}")
+                                new_temperature = st.slider("Temperature", 0.0, 2.0, float(current_params.get('temperature', 2.0)), 0.1, key=f"temp_{judge['id']}")
+                                new_max_tokens = st.number_input("Max Tokens", 100, 5000, int(current_params.get('max_tokens', 2500)), key=f"tokens_{judge['id']}")
+                                new_top_p = st.slider("Top P", 0.0, 1.0, float(current_params.get('top_p', 1.0)), 0.1, key=f"top_p_{judge['id']}")
                             
                             with col_param2:
-                                new_n_responses = st.number_input("N Responses", 1, 50, current_params.get('n_responses', 10), key=f"responses_{judge['id']}")
-                                new_frequency_penalty = st.slider("Frequency Penalty", 0.0, 2.0, current_params.get('frequency_penalty', 0.0), 0.1, key=f"freq_{judge['id']}")
-                                new_presence_penalty = st.slider("Presence Penalty", 0.0, 2.0, current_params.get('presence_penalty', 0.0), 0.1, key=f"pres_{judge['id']}")
+                                new_n_responses = st.number_input("N Responses", 1, 50, int(current_params.get('n_responses', 10)), key=f"responses_{judge['id']}")
+                                new_frequency_penalty = st.slider("Frequency Penalty", 0.0, 2.0, float(current_params.get('frequency_penalty', 0.0)), 0.1, key=f"freq_{judge['id']}")
+                                new_presence_penalty = st.slider("Presence Penalty", 0.0, 2.0, float(current_params.get('presence_penalty', 0.0)), 0.1, key=f"pres_{judge['id']}")
                             
                             col_time1, col_time2 = st.columns(2)
                             with col_time1:
-                                new_sleep_time = st.number_input("Sleep Time", 0.0, 5.0, current_params.get('sleep_time', 0.0), 0.1, key=f"sleep_{judge['id']}")
+                                new_sleep_time = st.number_input("Sleep Time", 0.0, 5.0, float(current_params.get('sleep_time', 0.0)), 0.1, key=f"sleep_{judge['id']}")
                             with col_time2:
-                                new_rate_limit_sleep = st.number_input("Rate Limit Sleep", 0.0, 10.0, current_params.get('rate_limit_sleep', 0.0), 0.1, key=f"rate_{judge['id']}")
+                                new_rate_limit_sleep = st.number_input("Rate Limit Sleep", 0.0, 10.0, float(current_params.get('rate_limit_sleep', 0.0)), 0.1, key=f"rate_{judge['id']}")
                             
                             col_btn1, col_btn2 = st.columns([1, 1])
                             with col_btn1:
@@ -781,6 +781,19 @@ with tabs[2]:
                         st.info("**Target Mode**: Compares actual vs expected output")
                     else:
                         st.info("**Direct Mode**: Evaluates actual output independently")
+                    
+                    # Show threshold history
+                    if st.button(f"Show Threshold History", key=f"threshold_history_{case['id']}"):
+                        threshold_history = run_async_function(fetch_api_data(f"cases/{case['id']}/thresholds"))
+                        if threshold_history and threshold_history.get('thresholds'):
+                            st.write("**Threshold History:**")
+                            for i, threshold in enumerate(threshold_history['thresholds']):
+                                timestamp = threshold['created_at'][:19].replace('T', ' ')
+                                is_current = i == 0  # Most recent is current
+                                status = " (Current)" if is_current else ""
+                                st.write(f"• {threshold['score']:.2f} - {timestamp}{status}")
+                        else:
+                            st.write("No threshold history available")
                     
                     # Update button
                     if st.button(f"Update Case", key=f"update_case_{case['id']}"):
