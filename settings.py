@@ -15,6 +15,11 @@ class Config:
         self.save_fp = os.getenv('SAVE_FP', 'results/gpt4_con_detailed_openai_4.json')
         self.summeval_fp = os.getenv('SUMMEVAL_FP', 'data/summeval_shuffle_4.json')
         
+        # Database configuration
+        self.database_type = os.getenv('DATABASE_TYPE', 'sqlite')  # 'sqlite' or 'dynamodb'
+        self.aws_region = os.getenv('AWS_REGION', 'us-east-1')
+        self.dynamodb_endpoint = os.getenv('DYNAMODB_ENDPOINT')  # For local DynamoDB
+        
         # OpenAI API configuration
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
         if not self.openai_api_key:

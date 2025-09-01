@@ -10,7 +10,7 @@ import uuid
 
 # Set page configuration
 st.set_page_config(
-    page_title="G-Eval Playground",
+    page_title="Tako AI Evaluation Playground",
     page_icon="G",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -92,7 +92,7 @@ def run_async_function(async_func):
         loop.close()
 
 # Main title
-st.title("G-Eval Playground")
+st.title("Tako AI Evaluation Playground")
 st.markdown("**Comprehensive evaluation system for LLM outputs**")
 
 # Check API health
@@ -896,8 +896,8 @@ with tabs[3]:
             if st.form_submit_button("Create Document"):
                 if actual_output:
                     doc_data = {
-                        "actual_output": actual_output,
-                        "expected_output": expected_output if expected_output else None
+                        "evaluationTarget": actual_output,
+                        "expectedOutput": expected_output if expected_output else None
                     }
                     with st.spinner("Creating document..."):
                         result = run_async_function(fetch_api_data("documents", "POST", doc_data))
@@ -913,11 +913,11 @@ with tabs[3]:
             for i, doc in enumerate(documents):
                 with st.expander(f"Document {i+1} (ID: {doc['id'][:8]}...)"):
                     st.write("**Actual Output:**")
-                    st.write(doc['actual_output'][:200] + "..." if len(doc['actual_output']) > 200 else doc['actual_output'])
+                    st.write(doc['evaluationTarget'][:200] + "..." if len(doc['evaluationTarget']) > 200 else doc['evaluationTarget'])
                     
-                    if doc.get('expected_output'):
+                    if doc.get('expectedOutput'):
                         st.write("**Expected Output:**")
-                        st.write(doc['expected_output'][:200] + "..." if len(doc['expected_output']) > 200 else doc['expected_output'])
+                        st.write(doc['expectedOutput'][:200] + "..." if len(doc['expectedOutput']) > 200 else doc['expectedOutput'])
                     
                     st.write(f"**Created:** {doc['created_at']}")
 
@@ -965,25 +965,87 @@ with tabs[4]:
             st.warning("Select a case first to see available judges.")
             judge_id = None
         
-        # Step 3: Document selection and submission (in form)
-        if judge_id:  # Only show document selection if judge is selected
+        # Step 3: Content input mode and submission (in form)
+        if judge_id:  # Only show content input if judge is selected
             with st.form("run_evaluation_form"):
-                # Step 3: Select Document
-                if documents:
-                    doc_options = {f"Document {i+1} ({doc['actual_output'][:50]}...)": doc['id'] for i, doc in enumerate(documents)}
-                    selected_doc = st.selectbox("Select Document", options=list(doc_options.keys()))
-                    document_id = doc_options[selected_doc] if selected_doc else None
+                # Choose input mode
+                input_mode = st.radio(
+                    "Content Input Mode",
+                    options=["Direct Input", "Use Existing Document"],
+                    help="Choose how to provide content for evaluation"
+                )
+                
+                if input_mode == "Direct Input":
+                    # Direct content input
+                    st.subheader("Direct Content Input")
+                    actual_output = st.text_area(
+                        "Content to Evaluate",
+                        placeholder="Enter the text you want to evaluate...",
+                        height=150,
+                        help="This is the content that will be evaluated by the judge"
+                    )
+                    
+                    # Get selected case to check if it requires reference
+                    selected_case_obj = next((case for case in cases if case['id'] == selected_case_id), None)
+                    requires_reference = selected_case_obj.get('requires_reference', False) if selected_case_obj else False
+                    
+                    if requires_reference:
+                        expected_output = st.text_area(
+                            "Expected Output (Reference)",
+                            placeholder="Enter the expected/reference output for comparison...",
+                            height=100,
+                            help="This case requires a reference output for comparison"
+                        )
+                        st.info("**Target Mode**: This case will compare your content against the expected output")
+                    else:
+                        expected_output = st.text_area(
+                            "Expected Output (Optional)",
+                            placeholder="Enter expected output if you want to provide a reference...",
+                            height=100,
+                            help="Optional reference output for this evaluation"
+                        )
+                        st.info("**Direct Mode**: This case evaluates content independently")
+                    
+                    document_id = None  # No document ID for direct input
+                    
                 else:
-                    st.warning("No documents available. Create a document first.")
-                    document_id = None
+                    # Document selection mode
+                    st.subheader("Select Existing Document")
+                    if documents:
+                        doc_options = {f"Document {i+1} ({doc['evaluationTarget'][:50]}...)": doc['id'] for i, doc in enumerate(documents)}
+                        selected_doc = st.selectbox("Select Document", options=list(doc_options.keys()))
+                        document_id = doc_options[selected_doc] if selected_doc else None
+                        actual_output = None
+                        expected_output = None
+                    else:
+                        st.warning("No documents available. Create a document first or use Direct Input mode.")
+                        document_id = None
+                        actual_output = None
+                        expected_output = None
                 
                 if st.form_submit_button("Run Evaluation", type="primary"):
-                    if judge_id and document_id:
-                        eval_data = {
-                            "judge_id": judge_id,
-                            "document_id": document_id
-                        }
-                        
+                    # Validate based on input mode
+                    if input_mode == "Direct Input":
+                        if judge_id and actual_output:
+                            eval_data = {
+                                "judge_id": judge_id,
+                                "evaluationTarget": actual_output,
+                                "expectedOutput": expected_output if expected_output else None
+                            }
+                        else:
+                            st.error("Please provide content to evaluate")
+                            eval_data = None
+                    else:  # Document mode
+                        if judge_id and document_id:
+                            eval_data = {
+                                "judge_id": judge_id,
+                                "document_id": document_id
+                            }
+                        else:
+                            st.error("Please select a document")
+                            eval_data = None
+                    
+                    if eval_data:
                         with st.spinner("Running evaluation... This may take a while."):
                             result = run_async_function(fetch_api_data("eval", "POST", eval_data))
                             if result:
@@ -1128,5 +1190,5 @@ with tabs[5]:
 
 # Footer
 st.markdown("---")
-st.caption("G-Eval Playground v1.0 - Comprehensive LLM Evaluation System")
+st.caption("Tako AI Evaluation Playground v1.0 - Comprehensive LLM Evaluation System")
 st.caption("Powered by FastAPI • Built with Streamlit")

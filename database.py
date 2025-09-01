@@ -475,20 +475,50 @@ class DatabaseManager:
     @staticmethod
     def create_run(
         judge_id: str,
-        document_id: str
+        document_id: Optional[str] = None,
+        actual_output: Optional[str] = None,
+        expected_output: Optional[str] = None
     ) -> int:
         """
         Create a new run record.
+        
+        Args:
+            judge_id: ID of the judge
+            document_id: ID of the document (SQLite mode - backward compatibility)
+            actual_output: Direct content for evaluation (DynamoDB mode)
+            expected_output: Reference content for evaluation (DynamoDB mode)
         
         Returns:
             The ID of the created run
         """
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO runs (judge_id, document_id, status, started_at)
-                VALUES (?, ?, 'pending', ?)
-            """, (judge_id, document_id, datetime.utcnow().isoformat()))
+            
+            # For SQLite, if document_id is provided, use it (backward compatibility)
+            # If not, we still need to store the content somehow for consistency
+            if document_id:
+                cursor.execute("""
+                    INSERT INTO runs (judge_id, document_id, status, started_at)
+                    VALUES (?, ?, 'pending', ?)
+                """, (judge_id, document_id, datetime.utcnow().isoformat()))
+            else:
+                # For direct content mode, create a temporary document first
+                if actual_output is None:
+                    raise ValueError("Either document_id or actual_output must be provided")
+                
+                # Create temporary document
+                cursor.execute("""
+                    INSERT INTO eval_documents (actual_output, expected_output, created_at)
+                    VALUES (?, ?, ?)
+                """, (actual_output, expected_output, datetime.utcnow().isoformat()))
+                temp_document_id = cursor.lastrowid
+                
+                # Create run with temporary document
+                cursor.execute("""
+                    INSERT INTO runs (judge_id, document_id, status, started_at)
+                    VALUES (?, ?, 'pending', ?)
+                """, (judge_id, temp_document_id, datetime.utcnow().isoformat()))
+            
             conn.commit()
             return cursor.lastrowid
     

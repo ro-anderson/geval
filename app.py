@@ -14,10 +14,10 @@ import uuid
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, model_validator
 import uvicorn
 
-from database import DatabaseManager
+from database_factory import db_manager
 from geval import GEval
 from openai import OpenAI
 from settings import config
@@ -183,30 +183,56 @@ class ThresholdHistoryResponse(BaseModel):
 
 class DocumentCreateRequest(BaseModel):
     """Request model for creating evaluation documents."""
-    actual_output: str = Field(..., description="The output being evaluated")
-    expected_output: Optional[str] = Field(None, description="Reference output for comparison (optional)")
+    actual_output: str = Field(..., description="The output being evaluated", alias="evaluationTarget")
+    expected_output: Optional[str] = Field(None, description="Reference output for comparison (optional)", alias="expectedOutput")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional document metadata")
+    
+    class Config:
+        populate_by_name = True  # Allow both field names and aliases
 
 class DocumentResponse(BaseModel):
     """Response model for evaluation documents."""
     id: str
-    actual_output: str
-    expected_output: Optional[str]
+    actual_output: str = Field(..., alias="evaluationTarget")
+    expected_output: Optional[str] = Field(None, alias="expectedOutput")
     metadata: Optional[Dict[str, Any]]
     created_at: str
+    
+    class Config:
+        populate_by_name = True  # Allow both field names and aliases
 
 class EvaluationRequest(BaseModel):
     """Request model for running evaluations."""
     judge_id: str = Field(..., description="ID of the judge to use for evaluation")
-    document_id: str = Field(..., description="ID of the document to evaluate")
+    document_id: Optional[str] = Field(None, description="ID of the document to evaluate (SQLite mode)")
+    actual_output: Optional[str] = Field(None, description="The output being evaluated", alias="evaluationTarget")
+    expected_output: Optional[str] = Field(None, description="Reference output for comparison (optional)", alias="expectedOutput")
     
-    @validator('judge_id', 'document_id')
-    def ids_must_be_uuid(cls, v):
+    @validator('judge_id')
+    def judge_id_must_be_uuid(cls, v):
         try:
             uuid.UUID(v)
         except ValueError:
-            raise ValueError('ID must be a valid UUID')
+            raise ValueError('Judge ID must be a valid UUID')
         return v
+    
+    @validator('document_id')
+    def document_id_must_be_uuid(cls, v):
+        if v is not None:
+            try:
+                uuid.UUID(v)
+            except ValueError:
+                raise ValueError('Document ID must be a valid UUID')
+        return v
+    
+    @model_validator(mode='after')
+    def validate_document_or_content(self):
+        if not self.document_id and not self.actual_output:
+            raise ValueError('Either document_id or actual_output must be provided')
+        return self
+    
+    class Config:
+        populate_by_name = True  # Allow both field names and aliases
 
 class EvaluationResponse(BaseModel):
     """Response model for evaluation results."""
@@ -228,7 +254,7 @@ class RunResponse(BaseModel):
     """Response model for detailed run information."""
     id: int
     judge_id: str
-    document_id: str
+    document_id: Optional[str]
     judge_name: Optional[str]
     case_name: str
     metric_name: str
@@ -275,8 +301,8 @@ async def health_check():
 async def create_metric(request: MetricCreateRequest):
     """Create a new evaluation methodology."""
     try:
-        metric_id = DatabaseManager.create_metric(name=request.name)
-        metric = DatabaseManager.get_metric(metric_id)
+        metric_id = db_manager.create_metric(name=request.name)
+        metric = db_manager.get_metric(metric_id)
         
         if not metric:
             raise HTTPException(
@@ -301,7 +327,7 @@ async def create_metric(request: MetricCreateRequest):
 async def list_metrics():
     """List all evaluation methodologies."""
     try:
-        metrics = DatabaseManager.list_metrics()
+        metrics = db_manager.list_metrics()
         return [MetricResponse(**metric) for metric in metrics]
     except Exception as e:
         raise HTTPException(
@@ -313,7 +339,7 @@ async def list_metrics():
 async def get_metric(metric_id: str):
     """Get a specific evaluation methodology by ID."""
     try:
-        metric = DatabaseManager.get_metric(metric_id)
+        metric = db_manager.get_metric(metric_id)
         if not metric:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -336,8 +362,8 @@ async def get_metric(metric_id: str):
 async def create_model(request: ModelCreateRequest):
     """Create a new LLM model configuration."""
     try:
-        model_id = DatabaseManager.create_model(name=request.name, provider=request.provider)
-        model = DatabaseManager.get_model(model_id)
+        model_id = db_manager.create_model(name=request.name, provider=request.provider)
+        model = db_manager.get_model(model_id)
         
         if not model:
             raise HTTPException(
@@ -362,7 +388,7 @@ async def create_model(request: ModelCreateRequest):
 async def list_models():
     """List all LLM model configurations."""
     try:
-        models = DatabaseManager.list_models()
+        models = db_manager.list_models()
         return [ModelResponse(**model) for model in models]
     except Exception as e:
         raise HTTPException(
@@ -374,7 +400,7 @@ async def list_models():
 async def get_model(model_id: str):
     """Get a specific LLM model configuration by ID."""
     try:
-        model = DatabaseManager.get_model(model_id)
+        model = db_manager.get_model(model_id)
         if not model:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -397,7 +423,7 @@ async def get_model(model_id: str):
 async def create_case(request: CaseCreateRequest):
     """Create a new evaluation case."""
     try:
-        case_id = DatabaseManager.create_case(
+        case_id = db_manager.create_case(
             name=request.name,
             task_introduction=request.task_introduction,
             evaluation_criteria=request.evaluation_criteria,
@@ -407,7 +433,7 @@ async def create_case(request: CaseCreateRequest):
             score_threshold=request.score_threshold
         )
         
-        case = DatabaseManager.get_case(case_id)
+        case = db_manager.get_case(case_id)
         if not case:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -431,7 +457,7 @@ async def create_case(request: CaseCreateRequest):
 async def list_cases():
     """List all evaluation cases."""
     try:
-        cases = DatabaseManager.list_cases()
+        cases = db_manager.list_cases()
         return [CaseResponse(**case) for case in cases]
     except Exception as e:
         raise HTTPException(
@@ -443,7 +469,7 @@ async def list_cases():
 async def get_case(case_id: str):
     """Get a specific evaluation case by ID."""
     try:
-        case = DatabaseManager.get_case(case_id)
+        case = db_manager.get_case(case_id)
         if not case:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -472,7 +498,7 @@ async def update_case(case_id: str, request: CaseUpdateRequest):
             )
         
         # Check if case exists
-        existing_case = DatabaseManager.get_case(case_id)
+        existing_case = db_manager.get_case(case_id)
         if not existing_case:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -488,7 +514,7 @@ async def update_case(case_id: str, request: CaseUpdateRequest):
                 )
         
         # Perform update
-        updated = DatabaseManager.update_case(
+        updated = db_manager.update_case(
             case_id=case_id,
             name=request.name,
             task_introduction=request.task_introduction,
@@ -506,7 +532,7 @@ async def update_case(case_id: str, request: CaseUpdateRequest):
             )
         
         # Return updated case
-        case = DatabaseManager.get_case(case_id)
+        case = db_manager.get_case(case_id)
         if not case:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -530,7 +556,7 @@ async def update_case(case_id: str, request: CaseUpdateRequest):
 async def list_thresholds():
     """List all threshold records."""
     try:
-        thresholds = DatabaseManager.list_thresholds()
+        thresholds = db_manager.list_thresholds()
         return [ThresholdResponse(**threshold) for threshold in thresholds]
     except Exception as e:
         raise HTTPException(
@@ -552,7 +578,7 @@ async def get_case_threshold_history(case_id: str):
             )
         
         # Check if case exists
-        case = DatabaseManager.get_case(case_id)
+        case = db_manager.get_case(case_id)
         if not case:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -561,7 +587,7 @@ async def get_case_threshold_history(case_id: str):
         
         # Get threshold history (for now, just current threshold since we migrated)
         # In the future, this could show historical threshold changes
-        current_threshold = DatabaseManager.get_threshold(case.get('threshold_id'))
+        current_threshold = db_manager.get_threshold(case.get('threshold_id'))
         
         if current_threshold:
             thresholds = [ThresholdResponse(**current_threshold)]
@@ -590,13 +616,13 @@ async def get_case_threshold_history(case_id: str):
 async def create_document(request: DocumentCreateRequest):
     """Create a new evaluation document."""
     try:
-        doc_id = DatabaseManager.create_document(
+        doc_id = db_manager.create_document(
             actual_output=request.actual_output,
             expected_output=request.expected_output,
             metadata=request.metadata
         )
         
-        document = DatabaseManager.get_document(doc_id)
+        document = db_manager.get_document(doc_id)
         if not document:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -615,7 +641,7 @@ async def create_document(request: DocumentCreateRequest):
 async def list_documents():
     """List all evaluation documents."""
     try:
-        documents = DatabaseManager.list_documents()
+        documents = db_manager.list_documents()
         return [DocumentResponse(**doc) for doc in documents]
     except Exception as e:
         raise HTTPException(
@@ -632,28 +658,28 @@ async def create_judge(request: JudgeCreateRequest):
     """Create a new specialized judge."""
     try:
         # Verify case, metric, and model exist
-        case = DatabaseManager.get_case(request.case_id)
+        case = db_manager.get_case(request.case_id)
         if not case:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Case not found"
             )
         
-        metric = DatabaseManager.get_metric(request.metric_id)
+        metric = db_manager.get_metric(request.metric_id)
         if not metric:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Metric not found"
             )
         
-        model = DatabaseManager.get_model(request.model_id)
+        model = db_manager.get_model(request.model_id)
         if not model:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Model not found"
             )
         
-        judge_id = DatabaseManager.create_judge(
+        judge_id = db_manager.create_judge(
             name=request.name,
             model_id=request.model_id,
             case_id=request.case_id,
@@ -662,7 +688,7 @@ async def create_judge(request: JudgeCreateRequest):
             description=request.description
         )
         
-        judge = DatabaseManager.get_judge(judge_id)
+        judge = db_manager.get_judge(judge_id)
         if not judge:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -683,7 +709,7 @@ async def create_judge(request: JudgeCreateRequest):
 async def list_judges():
     """List all specialized judges."""
     try:
-        judges = DatabaseManager.list_judges()
+        judges = db_manager.list_judges()
         return [JudgeResponse(**judge) for judge in judges]
     except Exception as e:
         raise HTTPException(
@@ -705,7 +731,7 @@ async def update_judge(judge_id: str, request: JudgeUpdateRequest):
             )
         
         # Check if judge exists
-        existing_judge = DatabaseManager.get_judge(judge_id)
+        existing_judge = db_manager.get_judge(judge_id)
         if not existing_judge:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -723,7 +749,7 @@ async def update_judge(judge_id: str, request: JudgeUpdateRequest):
                 )
             
             # Check if model exists
-            existing_model = DatabaseManager.get_model(request.model_id)
+            existing_model = db_manager.get_model(request.model_id)
             if not existing_model:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -731,7 +757,7 @@ async def update_judge(judge_id: str, request: JudgeUpdateRequest):
                 )
         
         # Perform update
-        updated = DatabaseManager.update_judge(
+        updated = db_manager.update_judge(
             judge_id=judge_id,
             name=request.name,
             parameters=request.parameters,
@@ -746,7 +772,7 @@ async def update_judge(judge_id: str, request: JudgeUpdateRequest):
             )
         
         # Return updated judge
-        judge = DatabaseManager.get_judge(judge_id)
+        judge = db_manager.get_judge(judge_id)
         if not judge:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -774,20 +800,32 @@ async def run_evaluation(request: EvaluationRequest):
     
     try:
         # Get judge with full case and metric information
-        judge = DatabaseManager.get_judge(request.judge_id)
+        judge = db_manager.get_judge(request.judge_id)
         if not judge:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Judge not found"
             )
         
-        # Get document
-        document = DatabaseManager.get_document(request.document_id)
-        if not document:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Document not found"
-            )
+        # Handle document/content - support both approaches
+        document = None
+        actual_output = None
+        expected_output = None
+        
+        if request.document_id:
+            # SQLite mode: get document from database
+            document = db_manager.get_document(request.document_id)
+            if not document:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Document not found"
+                )
+            actual_output = document['actual_output']
+            expected_output = document.get('expected_output')
+        else:
+            # DynamoDB mode: use direct content
+            actual_output = request.actual_output
+            expected_output = request.expected_output
         
         # Check metric type and handle accordingly
         if judge['metric_name'].lower() != 'geval':
@@ -796,14 +834,16 @@ async def run_evaluation(request: EvaluationRequest):
                 detail=f"Metric '{judge['metric_name']}' not yet implemented. Currently only 'geval' is supported."
             )
         
-        # Create run record
-        run_id = DatabaseManager.create_run(
+        # Create run record with document content
+        run_id = db_manager.create_run(
             judge_id=request.judge_id,
-            document_id=request.document_id
+            document_id=request.document_id,  # May be None for DynamoDB mode
+            actual_output=actual_output,
+            expected_output=expected_output
         )
         
         # Update run to running status
-        DatabaseManager.update_run_status(run_id, "running")
+        db_manager.update_run_status(run_id, "running")
         
         try:
             # Initialize GEval with judge parameters
@@ -823,9 +863,8 @@ async def run_evaluation(request: EvaluationRequest):
             # Create GEval instance
             geval = GEval(**geval_params)
             
-            # Prepare evaluation inputs based on requires_reference
-            actual_output = document['actual_output']
-            expected_output = document['expected_output'] if judge['requires_reference'] else None
+            # Execute evaluation with the content we already prepared
+            # actual_output and expected_output are already set from document or direct content
             
             # Execute evaluation
             if judge['requires_reference'] and expected_output:
@@ -847,7 +886,7 @@ async def run_evaluation(request: EvaluationRequest):
             final_score_normalized = (final_score - judge['min_score']) / score_range if score_range > 0 else 0
             
             # Complete the run with results
-            DatabaseManager.complete_run(
+            db_manager.complete_run(
                 run_id=run_id,
                 final_score=final_score,
                 final_score_normalized=final_score_normalized,
@@ -884,7 +923,7 @@ async def run_evaluation(request: EvaluationRequest):
         except Exception as e:
             # Mark run as failed
             error_msg = f"Evaluation failed: {str(e)}\n{traceback.format_exc()}"
-            DatabaseManager.update_run_status(run_id, "failed", error_msg)
+            db_manager.update_run_status(run_id, "failed", error_msg)
             
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -907,7 +946,7 @@ async def run_evaluation(request: EvaluationRequest):
 async def get_run(run_id: int):
     """Get detailed information about a specific run."""
     try:
-        run = DatabaseManager.get_run(run_id)
+        run = db_manager.get_run(run_id)
         if not run:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -926,7 +965,7 @@ async def get_run(run_id: int):
 async def list_runs(judge_id: Optional[str] = None, limit: int = 100):
     """List runs, optionally filtered by judge."""
     try:
-        runs = DatabaseManager.list_runs(judge_id=judge_id, limit=limit)
+        runs = db_manager.list_runs(judge_id=judge_id, limit=limit)
         return [RunResponse(**run) for run in runs]
     except Exception as e:
         raise HTTPException(
