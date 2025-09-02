@@ -36,10 +36,12 @@ class DynamoDBManager:
             endpoint_url=endpoint_url
         )
         
-        # Table references with didier- prefix (3-table architecture)
-        self.cases_table = self.dynamodb.Table('didier-CasesConfiguration')
-        self.judges_table = self.dynamodb.Table('didier-JudgesConfiguration')
-        self.runs_table = self.dynamodb.Table('didier-EvaluationRuns')
+        # Table references with rdidier- prefix (3-table architecture)
+        alias_ = 'rdidier-'
+        
+        self.cases_table = self.dynamodb.Table(f'{alias_}CasesConfiguration')
+        self.judges_table = self.dynamodb.Table(f'{alias_}JudgesConfiguration')
+        self.runs_table = self.dynamodb.Table(f'{alias_}EvaluationRuns')
         
         # In-memory storage for models and metrics (embedded approach)
         self._metrics = {}
