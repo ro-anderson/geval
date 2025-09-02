@@ -208,46 +208,6 @@ def create_dynamodb_tables(region='us-east-1', prefix='didier-'):
             print(f"⚠️  {prefix}EvaluationRuns already exists")
         else:
             print(f"❌ Error creating EvaluationRuns: {e}")
-    
-    # 4. ThresholdsHistory Table
-    try:
-        print(f"Creating {prefix}ThresholdsHistory table...")
-        dynamodb.create_table(
-            TableName=f'{prefix}ThresholdsHistory',
-            KeySchema=[
-                {'AttributeName': 'partitionKey', 'KeyType': 'HASH'},
-                {'AttributeName': 'sortKey', 'KeyType': 'RANGE'}
-            ],
-            AttributeDefinitions=[
-                {'AttributeName': 'partitionKey', 'AttributeType': 'S'},
-                {'AttributeName': 'sortKey', 'AttributeType': 'S'}
-            ],
-            BillingMode='PAY_PER_REQUEST',
-
-            Tags=[
-                {'Key': 'Project', 'Value': 'G-Eval'},
-                {'Key': 'Environment', 'Value': 'Development'},
-                {'Key': 'Owner', 'Value': 'didier'}
-            ]
-        )
-        tables_created.append(f'{prefix}ThresholdsHistory')
-        
-        # Enable point-in-time recovery
-        try:
-            dynamodb.update_continuous_backups(
-                TableName=f'{prefix}ThresholdsHistory',
-                PointInTimeRecoverySpecification={'PointInTimeRecoveryEnabled': True}
-            )
-        except ClientError:
-            pass  # May not be available in all regions
-            
-        print("✅ ThresholdsHistory created")
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'ResourceInUseException':
-            print(f"⚠️  {prefix}ThresholdsHistory already exists")
-        else:
-            print(f"❌ Error creating ThresholdsHistory: {e}")
-    
     return tables_created
 
 

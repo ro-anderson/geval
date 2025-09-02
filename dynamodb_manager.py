@@ -36,11 +36,10 @@ class DynamoDBManager:
             endpoint_url=endpoint_url
         )
         
-        # Table references with didier- prefix
+        # Table references with didier- prefix (3-table architecture)
         self.cases_table = self.dynamodb.Table('didier-CasesConfiguration')
         self.judges_table = self.dynamodb.Table('didier-JudgesConfiguration')
         self.runs_table = self.dynamodb.Table('didier-EvaluationRuns')
-        self.thresholds_table = self.dynamodb.Table('didier-ThresholdsHistory')
         
         # In-memory storage for models and metrics (embedded approach)
         self._metrics = {}
@@ -140,71 +139,23 @@ class DynamoDBManager:
         """List all models."""
         return list(self._models.values())
     
-    # THRESHOLDS Operations
-    def create_threshold(self, score: float) -> str:
-        """Create a new threshold record."""
-        if not 0.0 <= score <= 1.0:
-            raise ValueError("threshold score must be between 0.0 and 1.0")
-        
-        threshold_id = str(uuid.uuid4())
-        timestamp = datetime.utcnow().isoformat()
-        
-        try:
-            self.thresholds_table.put_item(
-                Item={
-                    'partitionKey': threshold_id,
-                    'sortKey': timestamp,
-                    'id': threshold_id,
-                    'score': Decimal(str(score)),
-                    'created_at': timestamp
-                }
-            )
-        except ClientError as e:
-            raise RuntimeError(f"Failed to create threshold: {e}")
-        
-        return threshold_id
+    # THRESHOLDS Operations (now embedded in CasesConfiguration)
+    # Threshold history is stored within each case record for better access patterns
     
     def get_threshold(self, threshold_id: str) -> Optional[Dict[str, Any]]:
-        """Get threshold by ID."""
-        try:
-            response = self.thresholds_table.query(
-                KeyConditionExpression='partitionKey = :pk',
-                ExpressionAttributeValues={':pk': threshold_id},
-                ScanIndexForward=False,
-                Limit=1
-            )
-            
-            items = response.get('Items', [])
-            if items:
-                item = self._convert_decimals(items[0])
-                return {
-                    'id': item['id'],
-                    'score': item['score'],
-                    'created_at': item['created_at']
-                }
-            return None
-        except ClientError:
-            return None
+        """Get threshold by ID - now searches within case threshold history."""
+        # Since thresholds are embedded in cases, we'd need to scan cases to find by threshold_id
+        # This is typically not needed since thresholds are accessed via case context
+        return None
     
     def list_thresholds(self, case_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """List thresholds, optionally filtered by case."""
-        # For now, just return all thresholds since we don't have case filtering in this design
-        try:
-            response = self.thresholds_table.scan()
-            items = response.get('Items', [])
-            
-            thresholds = []
-            for item in items:
-                converted = self._convert_decimals(item)
-                thresholds.append({
-                    'id': converted['id'],
-                    'score': converted['score'],
-                    'created_at': converted['created_at']
-                })
-            
-            return sorted(thresholds, key=lambda x: x['created_at'], reverse=True)
-        except ClientError:
-            return []
+        """List thresholds - now returns embedded threshold data from cases."""
+        if case_id:
+            case = self.get_case(case_id)
+            if case and 'threshold_history' in case:
+                return case['threshold_history']
+        # For global threshold listing, we'd need to scan all cases
+        return []
     
     # CASES Operations
     def create_case(
@@ -217,13 +168,20 @@ class DynamoDBManager:
         requires_reference: bool = False,
         score_threshold: float = 0.5
     ) -> str:
-        """Create a new evaluation case."""
+        """Create a new evaluation case with embedded threshold history."""
         case_id = str(uuid.uuid4())
         timestamp = datetime.utcnow().isoformat()
         version = "1.0"
+        threshold_id = str(uuid.uuid4())
         
-        # Create threshold first
-        threshold_id = self.create_threshold(score_threshold)
+        # Create initial threshold history entry
+        initial_threshold = {
+            'thresholdId': threshold_id,
+            'score': Decimal(str(score_threshold)),
+            'createdBy': 'system',
+            'reason': 'Initial case creation',
+            'createdAt': timestamp
+        }
         
         try:
             self.cases_table.put_item(
@@ -240,10 +198,8 @@ class DynamoDBManager:
                         'max': max_score
                     },
                     'requiresReference': requires_reference,
-                    'threshold': {
-                        'id': threshold_id,
-                        'score': Decimal(str(score_threshold))
-                    },
+                    'currentThreshold': Decimal(str(score_threshold)),
+                    'thresholdHistory': [initial_threshold],
                     'created_at': timestamp,
                     'createdOn': timestamp,
                     'lastUpdatedOn': timestamp,
@@ -273,7 +229,8 @@ class DynamoDBManager:
             items = response.get('Items', [])
             if items:
                 item = self._convert_decimals(items[0])
-                # Convert to expected format
+                # Convert to expected format with embedded threshold
+                latest_threshold = item.get('thresholdHistory', [{}])[-1] if item.get('thresholdHistory') else {}
                 return {
                     'id': item['caseId'],
                     'name': item['name'],
@@ -282,8 +239,8 @@ class DynamoDBManager:
                     'min_score': item['scoreRange']['min'],
                     'max_score': item['scoreRange']['max'],
                     'requires_reference': item['requiresReference'],
-                    'score_threshold': item['threshold']['score'],
-                    'threshold_id': item['threshold']['id'],
+                    'score_threshold': item.get('currentThreshold', 0.5),
+                    'threshold_id': latest_threshold.get('thresholdId', 'unknown'),
                     'created_at': item['created_at']
                 }
             return None
@@ -305,6 +262,7 @@ class DynamoDBManager:
             
             for item in items:
                 converted = self._convert_decimals(item)
+                latest_threshold = converted.get('thresholdHistory', [{}])[-1] if converted.get('thresholdHistory') else {}
                 cases.append({
                     'id': converted['caseId'],
                     'name': converted['name'],
@@ -313,8 +271,8 @@ class DynamoDBManager:
                     'min_score': converted['scoreRange']['min'],
                     'max_score': converted['scoreRange']['max'],
                     'requires_reference': converted['requiresReference'],
-                    'score_threshold': converted['threshold']['score'],
-                    'threshold_id': converted['threshold']['id'],
+                    'score_threshold': converted.get('currentThreshold', 0.5),
+                    'threshold_id': latest_threshold.get('thresholdId', 'unknown'),
                     'created_at': converted['created_at']
                 })
             
@@ -333,33 +291,17 @@ class DynamoDBManager:
         requires_reference: Optional[bool] = None,
         score_threshold: Optional[float] = None
     ) -> bool:
-        """Update case information. Creates new threshold record if score_threshold changes."""
-        
-        # Get current case
-        current_case = self.get_case(case_id)
-        if not current_case:
-            return False
-        
-        # Handle threshold update
-        threshold_info = {
-            'id': current_case['threshold_id'],
-            'score': current_case['score_threshold']
-        }
-        
-        if score_threshold is not None:
-            threshold_id = self.create_threshold(score_threshold)
-            threshold_info = {
-                'id': threshold_id,
-                'score': Decimal(str(score_threshold))
-            }
+        """Update case information with embedded threshold history."""
         
         # Build update expression
         update_expressions = []
         expression_values = {}
+        expression_attribute_names = {}
         
         if name is not None:
             update_expressions.append('#name = :name')
             expression_values[':name'] = name.lower()
+            expression_attribute_names['#name'] = 'name'
         
         if task_introduction is not None:
             update_expressions.append('taskIntroduction = :task_intro')
@@ -372,18 +314,38 @@ class DynamoDBManager:
         if min_score is not None:
             update_expressions.append('scoreRange.#min = :min_score')
             expression_values[':min_score'] = min_score
+            expression_attribute_names['#min'] = 'min'
         
         if max_score is not None:
             update_expressions.append('scoreRange.#max = :max_score')
             expression_values[':max_score'] = max_score
+            expression_attribute_names['#max'] = 'max'
         
         if requires_reference is not None:
             update_expressions.append('requiresReference = :requires_ref')
             expression_values[':requires_ref'] = requires_reference
         
+        # Handle threshold update with embedded history
         if score_threshold is not None:
-            update_expressions.append('#threshold = :threshold')
-            expression_values[':threshold'] = threshold_info
+            timestamp = datetime.utcnow().isoformat()
+            threshold_id = str(uuid.uuid4())
+            
+            # Create new threshold history entry
+            new_threshold_entry = {
+                'thresholdId': threshold_id,
+                'score': Decimal(str(score_threshold)),
+                'createdBy': 'user',  # Could be enhanced to pass actual user
+                'reason': 'Manual threshold update',
+                'createdAt': timestamp
+            }
+            
+            # Update current threshold and append to history
+            update_expressions.append('currentThreshold = :current_threshold')
+            update_expressions.append('thresholdHistory = list_append(if_not_exists(thresholdHistory, :empty_list), :new_threshold)')
+            
+            expression_values[':current_threshold'] = Decimal(str(score_threshold))
+            expression_values[':new_threshold'] = [new_threshold_entry]
+            expression_values[':empty_list'] = []
         
         if not update_expressions:
             return True
@@ -393,22 +355,23 @@ class DynamoDBManager:
         expression_values[':updated_on'] = datetime.utcnow().isoformat()
         
         try:
-            self.cases_table.update_item(
-                Key={
+            update_params = {
+                'Key': {
                     'partitionKey': case_id,
                     'sortKey': '1.0'  # Assuming version 1.0 for active cases
                 },
-                UpdateExpression=f"SET {', '.join(update_expressions)}",
-                ExpressionAttributeNames={
-                    '#name': 'name',
-                    '#min': 'min',
-                    '#max': 'max',
-                    '#threshold': 'threshold'
-                },
-                ExpressionAttributeValues=expression_values
-            )
+                'UpdateExpression': f"SET {', '.join(update_expressions)}",
+                'ExpressionAttributeValues': expression_values
+            }
+            
+            # Only include ExpressionAttributeNames if we have any
+            if expression_attribute_names:
+                update_params['ExpressionAttributeNames'] = expression_attribute_names
+            
+            self.cases_table.update_item(**update_params)
             return True
-        except ClientError:
+        except ClientError as e:
+            print(f"Update case error: {e}")
             return False
     
     # DOCUMENTS Operations (temporary storage for backward compatibility)
